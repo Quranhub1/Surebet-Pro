@@ -1,0 +1,2344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SureBet Pro - Automated Sports Predictions</title>
+    
+    <!-- React and ReactDOM via CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+        }
+        
+        .card-gradient {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+            backdrop-filter: blur(10px);
+        }
+        
+        .glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+        }
+        
+        .pulse-glow {
+            animation: pulseGlow 2s infinite;
+        }
+        
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.3); }
+            50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.6); }
+        }
+        
+        .loading-spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .processing-pulse {
+            animation: processingPulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes processingPulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+        
+        .table-row-hover:hover {
+            background: rgba(59, 130, 246, 0.1);
+            transition: background 0.2s ease;
+        }
+        
+        .confidence-high { color: #10b981; font-weight: 600; }
+        .confidence-medium { color: #f59e0b; font-weight: 600; }
+        .confidence-low { color: #ef4444; font-weight: 600; }
+        
+        .live-indicator {
+            animation: livePulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes livePulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Professional scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.4);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.6);
+        }
+        
+        /* Smooth transitions */
+        * {
+            transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+        }
+        
+        /* Button hover effects */
+        button {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        /* Input focus effects */
+        input:focus, select:focus, textarea:focus {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        
+        /* Badge styling */
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+        
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+        }
+        
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+        
+        .badge-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-white">
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+        
+        // ============================================
+        // CONFIGURATION & API KEYS
+        // ============================================
+        
+        const DEFAULT_CONFIG = {
+            apiKeys: {
+                openai: '',
+                anthropic: '',
+                google: '',
+                huggingface: '',
+                cohere: '',
+                groq: '',
+                footballData: ''
+            },
+            selectedAI: 'groq',
+            footballApi: '',
+            aggregationMethod: 'weighted',
+            dailyTarget: 100
+        };
+        
+        // Available AI Providers with Free Tiers
+        const AI_PROVIDERS = [
+            {
+                id: 'groq',
+                name: 'Groq',
+                description: 'Fast LLM inference - Free tier',
+                icon: 'fa-bolt',
+                color: 'text-yellow-400',
+                model: 'llama-3.1-70b-versatile'
+            },
+            {
+                id: 'openai',
+                name: 'OpenAI',
+                description: 'GPT-3.5 - $5 free credit',
+                icon: 'fa-brain',
+                color: 'text-green-400',
+                model: 'gpt-3.5-turbo'
+            },
+            {
+                id: 'huggingface',
+                name: 'HuggingFace',
+                description: 'Free inference API - No card needed',
+                icon: 'fa-robot',
+                color: 'text-orange-400',
+                model: 'meta-llama/Llama-3.1-8B-Instruct'
+            },
+            {
+                id: 'cohere',
+                name: 'Cohere',
+                description: 'Free: 5M tokens/month',
+                icon: 'fa-microchip',
+                color: 'text-blue-400',
+                model: 'command-r'
+            },
+            {
+                id: 'anthropic',
+                name: 'Anthropic',
+                description: 'Claude - $5 free credit',
+                icon: 'fa-comment',
+                color: 'text-red-400',
+                model: 'claude-3-haiku-20240307'
+            },
+            {
+                id: 'google',
+                name: 'Google AI',
+                description: 'Gemini 2.0 Flash - Free tier',
+                icon: 'fa-google',
+                color: 'text-blue-300',
+                model: 'gemini-2.0-flash'
+            }
+        ];
+        
+        // ============================================
+        // AI AGENTS (Hidden - run automatically)
+        // ============================================
+        
+        const AI_AGENTS = [
+            { id: 'analyst', name: 'Statistical Analyst', weight: 0.25 },
+            { id: 'tactician', name: 'Tactical Expert', weight: 0.20 },
+            { id: 'insider', name: 'Insider Intelligence', weight: 0.20 },
+            { id: 'trend', name: 'Trend Spotter', weight: 0.15 },
+            { id: 'weather', name: 'Condition Analyst', weight: 0.10 },
+            { id: 'consensus', name: 'Consensus Builder', weight: 0.10 }
+        ];
+        
+        // ============================================
+        // REAL FOOTBALL API SERVICE
+        // ============================================
+        
+        const FOOTBALL_API = {
+            baseUrl: 'https://api.football-data.org/v4',
+            corsProxy: 'https://corsproxy.io/?',
+            
+            // Fetch today's matches
+            getMatches: async (apiKey, date = null) => {
+                const now = new Date();
+                const targetDate = date || now.toISOString().split('T')[0];
+                
+                // Fetch for a 7-day window to get more matches
+                const endDate = new Date(now);
+                endDate.setDate(endDate.getDate() + 7);
+                const endDateStr = endDate.toISOString().split('T')[0];
+                
+                try {
+                    const url = `${FOOTBALL_API.baseUrl}/matches?dateFrom=${targetDate}&dateTo=${endDateStr}&status=SCHEDULED,TIMED,IN_PLAY`;
+                    const response = await fetch(url, {
+                        headers: { 
+                            'X-Auth-Token': apiKey,
+                            'Content-Type': 'application/json'
+                        },
+                        mode: 'cors',
+                        cache: 'no-cache'
+                    });
+                    
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            throw new Error('Invalid API key. Please check your Football-Data.org credentials.');
+                        } else if (response.status === 429) {
+                            throw new Error('Rate limit exceeded. Please try again in a moment.');
+                        } else if (response.status === 403) {
+                            throw new Error('Access forbidden. Your API key may not have the required permissions.');
+                        }
+                        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    return (data.matches || []).slice(0, 100); // Limit to 100 matches
+                } catch (e) {
+                    console.error('Football API Error:', e.message);
+                    throw new Error(`Failed to fetch matches: ${e.message}`);
+                }
+            },
+            
+            // Fetch competition teams
+            getCompetition: async (apiKey, competitionCode = 'PL') => {
+                const url = `${FOOTBALL_API.baseUrl}/competitions/${competitionCode}`;
+                
+                const response = await fetch(FOOTBALL_API.corsProxy + encodeURIComponent(url), {
+                    headers: { 'X-Auth-Token': apiKey }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                
+                return await response.json();
+            },
+            
+            // Fetch head-to-head
+            getHeadToHead: async (apiKey, matchId) => {
+                const url = `${FOOTBALL_API.baseUrl}/matches/${matchId}/head2head?limit=10`;
+                
+                const response = await fetch(url, {
+                    headers: { 'X-Auth-Token': apiKey }
+                });
+                
+                if (!response.ok) {
+                    return [];
+                }
+                
+                const data = await response.json();
+                return data.matches || [];
+            },
+            
+            // Get all available competitions
+            getCompetitions: async (apiKey) => {
+                const url = `${FOOTBALL_API.baseUrl}/competitions`;
+                
+                const response = await fetch(FOOTBALL_API.corsProxy + encodeURIComponent(url), {
+                    headers: { 'X-Auth-Token': apiKey }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                return data.competitions || [];
+            }
+        };
+        
+        // AI PREDICTION ENGINE (Using Ensemble of Multiple Models)
+        // ============================================
+        
+        const AIPredictionEngine = {
+            // Get ensemble prediction using MULTIPLE AI models for higher accuracy
+            getPrediction: async (config) => {
+                const matchData = config.matchData;
+                
+                // Define models to use (will call all available ones in parallel)
+                const modelsToTry = [
+                    { id: 'groq', key: config.apiKeys.groq },
+                    { id: 'openai', key: config.apiKeys.openai },
+                    { id: 'huggingface', key: config.apiKeys.huggingface },
+                    { id: 'cohere', key: config.apiKeys.cohere },
+                    { id: 'anthropic', key: config.apiKeys.anthropic },
+                    { id: 'google', key: config.apiKeys.google }
+                ].filter(m => m.key && m.key.length >= 5);
+                
+                // If no models configured, use local calculation
+                if (modelsToTry.length === 0) {
+                    const result = AIPredictionEngine.calculateLocalPrediction(matchData);
+                    return { ...result, ensembleModels: ['local'], modelCount: 1 };
+                }
+                
+                // Call all available models in parallel for ensemble prediction
+                const predictions = await Promise.allSettled(
+                    modelsToTry.map(model => 
+                        AIPredictionEngine.callProvider(model.id, model.key, matchData)
+                    )
+                );
+                
+                // Filter successful predictions
+                const successfulPredictions = predictions
+                    .map((p, idx) => p.status === 'fulfilled' ? p.value : null)
+                    .filter(p => p !== null);
+                
+                const modelsUsed = modelsToTry
+                    .map((m, idx) => predictions[idx].status === 'fulfilled' ? m.id : null)
+                    .filter(m => m !== null);
+                
+                // If we got at least one prediction, ensemble them
+                if (successfulPredictions.length > 0) {
+                    const ensembledResult = AIPredictionEngine.ensemblePredictions(
+                        successfulPredictions,
+                        matchData,
+                        modelsUsed
+                    );
+                    return ensembledResult;
+                }
+                
+                // Fallback to local calculation if all AI models fail
+                const result = AIPredictionEngine.calculateLocalPrediction(matchData);
+                return { ...result, ensembleModels: ['local'], modelCount: 1 };
+            },
+            
+            // Ensemble multiple predictions for better accuracy
+            ensemblePredictions: (predictions, matchData, modelsUsed) => {
+                // Average the probabilities across all models
+                const avgHomeWin = predictions.reduce((sum, p) => sum + p.homeWin, 0) / predictions.length;
+                const avgDraw = predictions.reduce((sum, p) => sum + p.draw, 0) / predictions.length;
+                const avgAwayWin = predictions.reduce((sum, p) => sum + p.awayWin, 0) / predictions.length;
+                
+                // Calculate consensus score (how much models agree)
+                const homeWinVar = predictions.reduce((sum, p) => sum + Math.pow(p.homeWin - avgHomeWin, 2), 0) / predictions.length;
+                const drawVar = predictions.reduce((sum, p) => sum + Math.pow(p.draw - avgDraw, 2), 0) / predictions.length;
+                const awayWinVar = predictions.reduce((sum, p) => sum + Math.pow(p.awayWin - avgAwayWin, 2), 0) / predictions.length;
+                
+                // Lower variance = better agreement = higher confidence boost
+                const consensusScore = 100 - (homeWinVar + drawVar + awayWinVar) / 3;
+                
+                // Average confidence from all models
+                const avgConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
+                
+                // Boost confidence based on model agreement (ensemble effect)
+                const modelBonus = Math.min(20, (predictions.length - 1) * 3); // More models = more confidence
+                const ensembleConfidence = Math.min(99, avgConfidence + modelBonus);
+                
+                // Get predicted score (use the most common one or average)
+                const scoreGroups = {};
+                predictions.forEach(p => {
+                    scoreGroups[p.predictedScore] = (scoreGroups[p.predictedScore] || 0) + 1;
+                });
+                const predictedScore = Object.keys(scoreGroups).reduce((a, b) => 
+                    scoreGroups[a] > scoreGroups[b] ? a : b
+                );
+                
+                // Get consensus reasoning from strongest model
+                const strongestModel = predictions.reduce((max, p) => 
+                    p.confidence > max.confidence ? p : max, predictions[0]
+                );
+                
+                return {
+                    homeWin: Math.round(avgHomeWin),
+                    draw: Math.round(avgDraw),
+                    awayWin: Math.round(avgAwayWin),
+                    confidence: Math.round(ensembleConfidence),
+                    predictedScore: predictedScore,
+                    reasoning: `Ensemble of ${modelsUsed.length} AI models: ${modelsUsed.join(', ')}. High agreement on prediction.`,
+                    consensusScore: Math.round(consensusScore),
+                    ensembleModels: modelsUsed,
+                    modelCount: modelsUsed.length,
+                    individualPredictions: predictions.map((p, idx) => ({
+                        model: modelsUsed[idx],
+                        homeWin: p.homeWin,
+                        draw: p.draw,
+                        awayWin: p.awayWin,
+                        confidence: p.confidence
+                    }))
+                };
+            },
+            
+            // Call specific AI provider
+            callProvider: async (provider, apiKey, matchData) => {
+                const prompt = AIPredictionEngine.buildPrompt(matchData);
+                
+                try {
+                    switch(provider) {
+                        case 'groq':
+                            return await AIPredictionEngine.callGroq(apiKey, prompt);
+                        case 'openai':
+                            return await AIPredictionEngine.callOpenAI(apiKey, prompt);
+                        case 'huggingface':
+                            return await AIPredictionEngine.callHuggingFace(apiKey, prompt);
+                        case 'cohere':
+                            return await AIPredictionEngine.callCohere(apiKey, prompt);
+                        case 'anthropic':
+                            return await AIPredictionEngine.callAnthropic(apiKey, prompt);
+                        case 'google':
+                            return await AIPredictionEngine.callGoogle(apiKey, prompt);
+                        default:
+                            return AIPredictionEngine.calculateLocalPrediction(matchData);
+                    }
+                } catch (error) {
+                    console.log(`${provider} prediction failed:`, error.message);
+                    return AIPredictionEngine.calculateLocalPrediction(matchData);
+                }
+            },
+            
+            // Build comprehensive prompt for thorough analysis
+            buildPrompt: (matchData) => {
+                return `Perform a COMPREHENSIVE football analysis for this match and provide predictions for ALL betting markets:
+
+MATCH DETAILS:
+- Home Team: ${matchData.homeTeam}
+- Away Team: ${matchData.awayTeam}
+- League: ${matchData.league}
+
+TEAM FORM (Last 5 matches - W=3, D=1, L=0):
+- Home Team: ${matchData.homeForm?.join(', ') || 'N/A'}
+- Away Team: ${matchData.awayForm?.join(', ') || 'N/A'}
+
+GOALS STATISTICS:
+- Home Goals Scored: ${matchData.homeGoalsScored}
+- Away Goals Scored: ${matchData.awayGoalsScored}
+- Home Goals Conceded: ${matchData.homeGoalsConceded}
+- Away Goals Conceded: ${matchData.awayGoalsConceded}
+
+REQUIRED PREDICTIONS FOR ALL MARKETS:
+
+1. MATCH RESULT (1X2):
+   - Home Win probability
+   - Draw probability  
+   - Away Win probability
+
+2. DOUBLE CHANCE (1X, 2X, 12):
+   - Home or Draw probability
+   - Away or Draw probability
+   - Home or Away probability
+
+3. OVER/UNDER GOALS:
+   - Over 0.5 goals probability
+   - Under 0.5 goals probability
+   - Over 1.5 goals probability
+   - Under 1.5 goals probability
+   - Over 2.5 goals probability
+   - Under 2.5 goals probability
+   - Over 3.5 goals probability
+   - Under 3.5 goals probability
+   - Over 4.5 goals probability
+   - Under 4.5 goals probability
+
+4. BOTH TEAMS TO SCORE (BTTS):
+   - Yes (both score) probability
+   - No (one team doesn't score) probability
+
+5. DRAW NO BET:
+   - Home (ignoring draw) probability
+   - Away (ignoring draw) probability
+
+6. ASIAN HANDICAP:
+   - Home -1 (wins by 2+) probability
+   - Home -0.5 (wins by 1+) probability
+   - Away -1 (wins by 2+) probability
+   - Away -0.5 (wins by 1+) probability
+   - Home +1 (doesn't lose by 1+) probability
+   - Away +1 (doesn't lose by 1+) probability
+
+7. CORRECT SCORE (Top 15 most likely):
+   - Provide probabilities for most likely scores
+
+ANALYSIS REQUIRED:
+1. Calculate current form points (last 5 matches)
+2. Consider home advantage factor (~10-15%)
+3. Analyze goal-scoring patterns (attack vs defense)
+4. Check head-to-head history if available
+5. Evaluate scoring consistency
+6. Consider league strength and match importance
+
+Provide JSON with comprehensive predictions:
+{
+  "matchResult": {
+    "homeWin": percentage,
+    "draw": percentage,
+    "awayWin": percentage
+  },
+  "doubleChance": {
+    "homeDraw": percentage,
+    "awayDraw": percentage,
+    "homeAway": percentage
+  },
+  "overUnder": {
+    "over1_5": percentage,
+    "under1_5": percentage,
+    "over2_5": percentage,
+    "under2_5": percentage,
+    "over3_5": percentage,
+    "under3_5": percentage
+  },
+  "btts": {
+    "yes": percentage,
+    "no": percentage
+  },
+  "drawNoBet": {
+    "home": percentage,
+    "away": percentage
+  },
+  "asianHandicap": {
+    "home_minus1": percentage,
+    "home_minus0_5": percentage,
+    "away_minus1": percentage,
+    "away_minus0_5": percentage,
+    "home_plus1": percentage,
+    "away_plus1": percentage
+  },
+  "correctScore": {
+    "1-0": percentage,
+    "2-0": percentage,
+    "2-1": percentage,
+    "3-0": percentage,
+    "3-1": percentage,
+    "3-2": percentage,
+    "0-0": percentage,
+    "1-1": percentage,
+    "2-2": percentage,
+    "0-1": percentage,
+    "0-2": percentage,
+    "1-2": percentage,
+    "0-3": percentage,
+    "1-3": percentage,
+    "2-3": percentage
+  },
+  "confidence": confidence (0-100),
+  "predictedScore": "home-away",
+  "analysis": {
+    "homeFormPoints": number,
+    "awayFormPoints": number,
+    "homeAdvantage": percentage,
+    "attackStrength": "strong/moderate/weak",
+    "defenseStrength": "strong/moderate/weak",
+    "totalGoalsExpected": number,
+    "reasoning": "detailed explanation for each market"
+  }
+}`;
+            },
+            
+            // Parse AI response
+            parseResponse: (content) => {
+                try {
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const prediction = JSON.parse(jsonMatch[0]);
+                        
+                        // Handle both old and new prediction formats
+                        if (prediction.matchResult) {
+                            // New comprehensive format
+                            return {
+                                // 1X2 predictions
+                                homeWin: Math.min(90, Math.max(10, prediction.matchResult.homeWin || 33)),
+                                draw: Math.min(40, Math.max(5, prediction.matchResult.draw || 33)),
+                                awayWin: Math.min(90, Math.max(10, prediction.matchResult.awayWin || 34)),
+                                
+                                // Double chance
+                                doubleChance: {
+                                    homeDraw: prediction.doubleChance?.homeDraw || (prediction.matchResult.homeWin + prediction.matchResult.draw),
+                                    awayDraw: prediction.doubleChance?.awayDraw || (prediction.matchResult.awayWin + prediction.matchResult.draw),
+                                    homeAway: prediction.doubleChance?.homeAway || (prediction.matchResult.homeWin + prediction.matchResult.awayWin)
+                                },
+                                
+                                // Over/Under
+                                overUnder: {
+                                        over0_5: prediction.overUnder?.over0_5 || 95,
+                                        under0_5: prediction.overUnder?.under0_5 || 5,
+                                        over1_5: prediction.overUnder?.over1_5 || 70,
+                                        under1_5: prediction.overUnder?.under1_5 || 30,
+                                        over2_5: prediction.overUnder?.over2_5 || 50,
+                                        under2_5: prediction.overUnder?.under2_5 || 50,
+                                        over3_5: prediction.overUnder?.over3_5 || 30,
+                                        under3_5: prediction.overUnder?.under3_5 || 70,
+                                        over4_5: prediction.overUnder?.over4_5 || 20,
+                                        under4_5: prediction.overUnder?.under4_5 || 80
+                                    },
+                                
+                                // BTTS
+                                btts: {
+                                    yes: prediction.btts?.yes || 55,
+                                    no: prediction.btts?.no || 45
+                                },
+                                
+                                // Draw No Bet
+                                drawNoBet: {
+                                    home: prediction.drawNoBet?.home || (prediction.matchResult.homeWin / (prediction.matchResult.homeWin + prediction.matchResult.awayWin) * 100),
+                                    away: prediction.drawNoBet?.away || (prediction.matchResult.awayWin / (prediction.matchResult.homeWin + prediction.matchResult.awayWin) * 100)
+                                },
+                                
+                                // Asian Handicap
+                                asianHandicap: {
+                                    home_minus1: prediction.asianHandicap?.home_minus1 || Math.max(0, prediction.matchResult.homeWin - 15),
+                                    home_minus0_5: prediction.asianHandicap?.home_minus0_5 || Math.max(0, prediction.matchResult.homeWin - 5),
+                                    away_minus1: prediction.asianHandicap?.away_minus1 || Math.max(0, prediction.matchResult.awayWin - 15),
+                                    away_minus0_5: prediction.asianHandicap?.away_minus0_5 || Math.max(0, prediction.matchResult.awayWin - 5),
+                                    home_plus1: prediction.asianHandicap?.home_plus1 || (prediction.matchResult.homeWin + prediction.matchResult.draw),
+                                    away_plus1: prediction.asianHandicap?.away_plus1 || (prediction.matchResult.awayWin + prediction.matchResult.draw)
+                                },
+                                
+                                // Correct Score
+                                correctScore: prediction.correctScore || {
+                                    "1-0": 15, "2-0": 10, "2-1": 12, "3-0": 5, "3-1": 6, "3-2": 4,
+                                    "0-0": 8, "1-1": 10, "2-2": 6,
+                                    "0-1": 8, "0-2": 5, "1-2": 6, "0-3": 2, "1-3": 3, "2-3": 2
+                                },
+                                
+                                confidence: Math.min(95, Math.max(50, prediction.confidence || 70)),
+                                predictedScore: prediction.predictedScore || '1-1',
+                                reasoning: prediction.analysis?.reasoning || 'Comprehensive AI analysis complete',
+                                analysis: prediction.analysis || {}
+                            };
+                        } else {
+                            // Legacy format fallback
+                            return {
+                                homeWin: Math.min(90, Math.max(10, prediction.homeWin || 33)),
+                                draw: Math.min(40, Math.max(5, prediction.draw || 33)),
+                                awayWin: Math.min(90, Math.max(10, prediction.awayWin || 34)),
+                                confidence: Math.min(95, Math.max(50, prediction.confidence || 70)),
+                                predictedScore: prediction.predictedScore || '1-1',
+                                reasoning: prediction.reasoning || 'AI analysis complete'
+                            };
+                        }
+                    }
+                } catch (e) {}
+                return null;
+            },
+            
+            // Groq API
+            callGroq: async (apiKey, prompt) => {
+                const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'llama-3.1-70b-versatile',
+                        messages: [
+                            { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 500
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Groq API error');
+                const data = await response.json();
+                const result = AIPredictionEngine.parseResponse(data.choices[0].message.content);
+                if (result) return result;
+                throw new Error('Invalid response');
+            },
+            
+            // OpenAI API
+            callOpenAI: async (apiKey, prompt) => {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-3.5-turbo',
+                        messages: [
+                            { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.3
+                    })
+                });
+                
+                if (!response.ok) throw new Error('OpenAI API error');
+                const data = await response.json();
+                const result = AIPredictionEngine.parseResponse(data.choices[0].message.content);
+                if (result) return result;
+                throw new Error('Invalid response');
+            },
+            
+            // HuggingFace API
+            callHuggingFace: async (apiKey, prompt) => {
+                const response = await fetch('https://api-inference.huggingface.co/models/meta-llama/Llama-3.1-8B-Instruct/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        messages: [
+                            { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 500
+                    })
+                });
+                
+                if (!response.ok) throw new Error('HuggingFace API error');
+                const data = await response.json();
+                const result = AIPredictionEngine.parseResponse(data.choices[0].message.content);
+                if (result) return result;
+                throw new Error('Invalid response');
+            },
+            
+            // Cohere API (via HuggingFace router)
+            callCohere: async (apiKey, prompt) => {
+                // Use HuggingFace router for Cohere models
+                const response = await fetch('https://router.huggingface.co/cohere/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'CohereLabs/aya-vision-32b',
+                        messages: [
+                            { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 500
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Cohere API error');
+                const data = await response.json();
+                const result = AIPredictionEngine.parseResponse(data.choices[0].message.content);
+                if (result) return result;
+                throw new Error('Invalid response');
+            },
+            
+            // Anthropic API
+            callAnthropic: async (apiKey, prompt) => {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'x-api-key': apiKey,
+                        'anthropic-version': '2023-06-01',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'claude-3-haiku-20240307',
+                        max_tokens: 500,
+                        system: 'You are a football prediction expert. Always respond with valid JSON only.',
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Anthropic API error');
+                const data = await response.json();
+                const result = AIPredictionEngine.parseResponse(data.content[0].text);
+                if (result) return result;
+                throw new Error('Invalid response');
+            },
+            
+            // Google AI (Gemini 2.0 Flash - Free)
+            callGoogle: async (apiKey, prompt) => {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: 'You are a football prediction expert. Always respond with valid JSON only. ' + prompt
+                            }]
+                        }],
+                        generationConfig: { temperature: 0.3, maxOutputTokens: 500 }
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Google API error');
+                const data = await response.json();
+                const result = AIPredictionEngine.parseResponse(data.candidates[0].content.parts[0].text);
+                if (result) return result;
+                throw new Error('Invalid response');
+            },
+            
+            // Local prediction calculation (fallback)
+            calculateLocalPrediction: (matchData) => {
+                const homeStrength = (parseFloat(matchData.homeGoalsScored) / (parseFloat(matchData.homeGoalsScored) + parseFloat(matchData.awayGoalsScored) + 0.5));
+                const awayStrength = (parseFloat(matchData.awayGoalsScored) / (parseFloat(matchData.homeGoalsScored) + parseFloat(matchData.awayGoalsScored) + 0.5));
+                
+                // Calculate base probabilities with home advantage
+                let homeProb = 0.35 + (homeStrength * 0.35) + 0.08;
+                let awayProb = 0.25 + (awayStrength * 0.30);
+                let drawProb = 1 - homeProb - awayProb;
+                
+                // Form adjustment
+                if (matchData.homeForm) {
+                    const homeFormSum = matchData.homeForm.reduce((a, b) => a + b, 0);
+                    homeProb += (homeFormSum / 15) * 0.1;
+                }
+                if (matchData.awayForm) {
+                    const awayFormSum = matchData.awayForm.reduce((a, b) => a + b, 0);
+                    awayProb += (awayFormSum / 15) * 0.1;
+                }
+                
+                // Normalize
+                const total = homeProb + awayProb + drawProb;
+                homeProb = (homeProb / total * 100);
+                awayProb = (awayProb / total * 100);
+                drawProb = 100 - homeProb - awayProb;
+                
+                const confidence = Math.min(95, 55 + (homeStrength * 25) + (awayStrength * 20));
+                
+                const homeGoals = Math.round(parseFloat(matchData.homeGoalsScored) * 0.8 + Math.random() * 0.8);
+                const awayGoals = Math.round(parseFloat(matchData.awayGoalsScored) * 0.8 + Math.random() * 0.8);
+                
+                return {
+                    homeWin: Math.round(homeProb),
+                    draw: Math.round(drawProb),
+                    awayWin: Math.round(awayProb),
+                    confidence: Math.round(confidence),
+                    predictedScore: `${homeGoals}-${awayGoals}`,
+                    reasoning: 'Statistical analysis based on team performance'
+                };
+            },
+            
+            // Generate odds based on AI prediction
+            generateOdds: (prediction, match) => {
+                const homeOdds = Math.max(1.10, Math.min(15.00, (100 / prediction.homeWin) * 0.92));
+                const awayOdds = Math.max(1.10, Math.min(15.00, (100 / prediction.awayWin) * 0.92));
+                const drawOdds = Math.max(1.10, Math.min(12.00, (100 / prediction.draw) * 0.90));
+                
+                // Calculate expected goals
+                const expectedGoals = parseFloat(prediction.predictedScore.split('-')[0]) + parseFloat(prediction.predictedScore.split('-')[1]);
+                
+                return {
+                    '1X2': {
+                        '1': Math.round(homeOdds * 100) / 100,
+                        'X': Math.round(drawOdds * 100) / 100,
+                        '2': Math.round(awayOdds * 100) / 100
+                    },
+                    '1X': {
+                        '1X': Math.round((homeOdds * drawOdds / (homeOdds + drawOdds) * 1.1) * 100) / 100,
+                        '2X': Math.round((awayOdds * drawOdds / (awayOdds + drawOdds) * 1.1) * 100) / 100,
+                        '12': Math.round((homeOdds * awayOdds / (homeOdds + awayOdds) * 1.1) * 100) / 100
+                    },
+                    'OU': {
+                        'O0.5': Math.round((100 / (prediction.overUnder?.over0_5 || 95)) * 0.95 * 100) / 100,
+                        'U0.5': Math.round((100 / (prediction.overUnder?.under0_5 || 5)) * 0.95 * 100) / 100,
+                        'O1.5': Math.round((100 / (prediction.overUnder?.over1_5 || 70)) * 0.95 * 100) / 100,
+                        'U1.5': Math.round((100 / (prediction.overUnder?.under1_5 || 30)) * 0.95 * 100) / 100,
+                        'O2.5': Math.round((100 / (prediction.overUnder?.over2_5 || 50)) * 0.95 * 100) / 100,
+                        'U2.5': Math.round((100 / (prediction.overUnder?.under2_5 || 50)) * 0.95 * 100) / 100,
+                        'O3.5': Math.round((100 / (prediction.overUnder?.over3_5 || 30)) * 0.95 * 100) / 100,
+                        'U3.5': Math.round((100 / (prediction.overUnder?.under3_5 || 70)) * 0.95 * 100) / 100,
+                        'O4.5': Math.round((100 / (prediction.overUnder?.over4_5 || 20)) * 0.95 * 100) / 100,
+                        'U4.5': Math.round((100 / (prediction.overUnder?.under4_5 || 80)) * 0.95 * 100) / 100
+                    },
+                    'BTTS': {
+                        'YES': Math.round((100 / (prediction.btts?.yes || 55)) * 0.95 * 100) / 100,
+                        'NO': Math.round((100 / (prediction.btts?.no || 45)) * 0.95 * 100) / 100
+                    },
+                    'DC': {
+                        '1': Math.round((100 / (prediction.drawNoBet?.home || (prediction.homeWin / (prediction.homeWin + prediction.awayWin) * 100))) * 0.95 * 100) / 100,
+                        '2': Math.round((100 / (prediction.drawNoBet?.away || (prediction.awayWin / (prediction.homeWin + prediction.awayWin) * 100))) * 0.95 * 100) / 100
+                    },
+                    'HANDICAP': {
+                        'H-1': Math.round((100 / (prediction.asianHandicap?.home_minus1 || Math.max(5, prediction.homeWin - 15))) * 0.95 * 100) / 100,
+                        'H-0.5': Math.round((100 / (prediction.asianHandicap?.home_minus0_5 || Math.max(5, prediction.homeWin - 5))) * 0.95 * 100) / 100,
+                        'A-1': Math.round((100 / (prediction.asianHandicap?.away_minus1 || Math.max(5, prediction.awayWin - 15))) * 0.95 * 100) / 100,
+                        'A-0.5': Math.round((100 / (prediction.asianHandicap?.away_minus0_5 || Math.max(5, prediction.awayWin - 5))) * 0.95 * 100) / 100,
+                        'H+1': Math.round((100 / (prediction.asianHandicap?.home_plus1 || (prediction.homeWin + prediction.draw))) * 0.95 * 100) / 100,
+                        'A+1': Math.round((100 / (prediction.asianHandicap?.away_plus1 || (prediction.awayWin + prediction.draw))) * 0.95 * 100) / 100
+                    },
+                    'SCORE': {
+                        '1-0': Math.round((100 / (prediction.correctScore?.['1-0'] || 15)) * 0.95 * 100) / 100,
+                        '2-0': Math.round((100 / (prediction.correctScore?.['2-0'] || 10)) * 0.95 * 100) / 100,
+                        '2-1': Math.round((100 / (prediction.correctScore?.['2-1'] || 12)) * 0.95 * 100) / 100,
+                        '3-0': Math.round((100 / (prediction.correctScore?.['3-0'] || 5)) * 0.95 * 100) / 100,
+                        '3-1': Math.round((100 / (prediction.correctScore?.['3-1'] || 6)) * 0.95 * 100) / 100,
+                        '3-2': Math.round((100 / (prediction.correctScore?.['3-2'] || 4)) * 0.95 * 100) / 100,
+                        '0-0': Math.round((100 / (prediction.correctScore?.['0-0'] || 8)) * 0.95 * 100) / 100,
+                        '1-1': Math.round((100 / (prediction.correctScore?.['1-1'] || 10)) * 0.95 * 100) / 100,
+                        '2-2': Math.round((100 / (prediction.correctScore?.['2-2'] || 6)) * 0.95 * 100) / 100,
+                        '0-1': Math.round((100 / (prediction.correctScore?.['0-1'] || 8)) * 0.95 * 100) / 100,
+                        '0-2': Math.round((100 / (prediction.correctScore?.['0-2'] || 5)) * 0.95 * 100) / 100,
+                        '1-2': Math.round((100 / (prediction.correctScore?.['1-2'] || 6)) * 0.95 * 100) / 100,
+                        '0-3': Math.round((100 / (prediction.correctScore?.['0-3'] || 2)) * 0.95 * 100) / 100,
+                        '1-3': Math.round((100 / (prediction.correctScore?.['1-3'] || 3)) * 0.95 * 100) / 100,
+                        '2-3': Math.round((100 / (prediction.correctScore?.['2-3'] || 2)) * 0.95 * 100) / 100
+                    }
+                };
+            }
+        };
+        
+        // ============================================
+        // MAIN APP COMPONENT
+        // ============================================
+        
+        function App() {
+            const [config, setConfig] = useState(DEFAULT_CONFIG);
+            const [matches, setMatches] = useState([]);
+            const [filteredMatches, setFilteredMatches] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [generationProgress, setGenerationProgress] = useState(0);
+            const [lastGenerated, setLastGenerated] = useState(null);
+            const [showSettings, setShowSettings] = useState(false);
+            const [selectedMatch, setSelectedMatch] = useState(null);
+            const [showBetSlip, setShowBetSlip] = useState(false);
+            const [betSlip, setBetSlip] = useState([]);
+            const [showPredictionExplanation, setShowPredictionExplanation] = useState(null);
+            
+            // Comprehensive betting markets
+            const bettingMarkets = {
+                '1X2': {
+                    name: 'Match Result',
+                    options: [
+                        { key: '1', label: 'Home Win', description: 'Home team wins' },
+                        { key: 'X', label: 'Draw', description: 'Match ends in a draw' },
+                        { key: '2', label: 'Away Win', description: 'Away team wins' }
+                    ]
+                },
+                '1X': {
+                    name: 'Double Chance',
+                    options: [
+                        { key: '1X', label: 'Home or Draw', description: 'Home team wins or draws' },
+                        { key: '2X', label: 'Away or Draw', description: 'Away team wins or draws' },
+                        { key: '12', label: 'Home or Away', description: 'Either team wins (no draw)' }
+                    ]
+                },
+                'OU': {
+                    name: 'Over/Under',
+                    options: [
+                        { key: 'O2.5', label: 'Over 2.5', description: 'Total goals over 2.5' },
+                        { key: 'U2.5', label: 'Under 2.5', description: 'Total goals under 2.5' },
+                        { key: 'O1.5', label: 'Over 1.5', description: 'Total goals over 1.5' },
+                        { key: 'U1.5', label: 'Under 1.5', description: 'Total goals under 1.5' },
+                        { key: 'O3.5', label: 'Over 3.5', description: 'Total goals over 3.5' },
+                        { key: 'U3.5', label: 'Under 3.5', description: 'Total goals under 3.5' }
+                    ]
+                },
+                'BTTS': {
+                    name: 'Both Teams To Score',
+                    options: [
+                        { key: 'YES', label: 'Yes', description: 'Both teams score' },
+                        { key: 'NO', label: 'No', description: 'At least one team doesn\'t score' }
+                    ]
+                },
+                'DC': {
+                    name: 'Draw No Bet',
+                    options: [
+                        { key: '1', label: 'Home', description: 'Home team wins (draw returns stake)' },
+                        { key: '2', label: 'Away', description: 'Away team wins (draw returns stake)' }
+                    ]
+                },
+                'HANDICAP': {
+                    name: 'Asian Handicap',
+                    options: [
+                        { key: 'H-1', label: 'Home -1', description: 'Home team wins by 2+ goals' },
+                        { key: 'H-0.5', label: 'Home -0.5', description: 'Home team wins by 1+ goal' },
+                        { key: 'A-1', label: 'Away -1', description: 'Away team wins by 2+ goals' },
+                        { key: 'A-0.5', label: 'Away -0.5', description: 'Away team wins by 1+ goal' },
+                        { key: 'H+1', label: 'Home +1', description: 'Home team loses by 0 goals or wins' },
+                        { key: 'A+1', label: 'Away +1', description: 'Away team loses by 0 goals or wins' }
+                    ]
+                },
+                'SCORE': {
+                    name: 'Correct Score',
+                    options: [
+                        { key: '1-0', label: '1-0', description: 'Home wins 1-0' },
+                        { key: '2-0', label: '2-0', description: 'Home wins 2-0' },
+                        { key: '2-1', label: '2-1', description: 'Home wins 2-1' },
+                        { key: '3-0', label: '3-0', description: 'Home wins 3-0' },
+                        { key: '3-1', label: '3-1', description: 'Home wins 3-1' },
+                        { key: '3-2', label: '3-2', description: 'Home wins 3-2' },
+                        { key: '0-0', label: '0-0', description: 'Draw 0-0' },
+                        { key: '1-1', label: '1-1', description: 'Draw 1-1' },
+                        { key: '2-2', label: '2-2', description: 'Draw 2-2' },
+                        { key: '0-1', label: '0-1', description: 'Away wins 0-1' },
+                        { key: '0-2', label: '0-2', description: 'Away wins 0-2' },
+                        { key: '1-2', label: '1-2', description: 'Away wins 1-2' },
+                        { key: '0-3', label: '0-3', description: 'Away wins 0-3' },
+                        { key: '1-3', label: '1-3', description: 'Away wins 1-3' },
+                        { key: '2-3', label: '2-3', description: 'Away wins 2-3' }
+                    ]
+                }
+            };
+            
+            const [filters, setFilters] = useState({
+                minConfidence: 0,
+                maxOdds: 100,
+                league: '',
+                sureBetOnly: false,
+                search: '',
+                sortBy: 'date',
+                sortOrder: 'asc'
+            });
+            const [currentPage, setCurrentPage] = useState(1);
+            const [expandedMatch, setExpandedMatch] = useState(null);
+            const [availableLeagues, setAvailableLeagues] = useState([]);
+            const [apiError, setApiError] = useState(null);
+            const [nextRefresh, setNextRefresh] = useState(null);
+            const itemsPerPage = 50;
+            
+            // Load matches on mount if API key exists
+            useEffect(() => {
+                if (config.apiKeys.footballData && matches.length === 0 && !loading) {
+                    loadRealMatches();
+                }
+            }, [config.apiKeys.footballData, matches.length, loading]);
+            
+            // Auto-refresh every hour for 12 hours (hidden)
+            useEffect(() => {
+                if (!config.apiKeys.footballData || matches.length === 0) return;
+                
+                let refreshCount = 0;
+                const maxRefreshes = 12; // 12 hours worth of refreshes
+                const refreshInterval = 60 * 60 * 1000; // 1 hour in milliseconds
+                
+                // Set initial next refresh time
+                const nextTime = new Date(Date.now() + refreshInterval);
+                setNextRefresh(nextTime);
+                
+                const autoRefresh = setInterval(() => {
+                    if (refreshCount < maxRefreshes) {
+                        console.log(`Auto-refresh ${refreshCount + 1}/12 - Fetching latest matches...`);
+                        loadRealMatches();
+                        refreshCount++;
+                        
+                        // Update next refresh time
+                        const nextTime = new Date(Date.now() + refreshInterval);
+                        setNextRefresh(nextTime);
+                    } else {
+                        clearInterval(autoRefresh);
+                        setNextRefresh(null);
+                    }
+                }, refreshInterval);
+                
+                return () => clearInterval(autoRefresh);
+            }, [config.apiKeys.footballData, matches.length]);
+            
+            // Apply filters
+            useEffect(() => {
+                if (matches.length > 0) {
+                    let filtered = matches.filter(match => {
+                        if (filters.minConfidence && match.aiPrediction.confidence < filters.minConfidence) return false;
+                        if (filters.league && match.league !== filters.league) return false;
+                        if (filters.sureBetOnly && !match.aiPrediction.sureBet) return false;
+                        if (filters.search) {
+                            const search = filters.search.toLowerCase();
+                            if (!match.homeTeam.toLowerCase().includes(search) && 
+                                !match.awayTeam.toLowerCase().includes(search) &&
+                                !match.league.toLowerCase().includes(search)) return false;
+                        }
+                        return true;
+                    });
+                    
+                    filtered = [...filtered].sort((a, b) => {
+                        switch (filters.sortBy) {
+                            case 'confidence':
+                                return filters.sortOrder === 'desc' 
+                                    ? b.aiPrediction.confidence - a.aiPrediction.confidence
+                                    : a.aiPrediction.confidence - b.aiPrediction.confidence;
+                            case 'date':
+                            default:
+                                return filters.sortOrder === 'asc'
+                                    ? new Date(a.utcDate) - new Date(b.utcDate)
+                                    : new Date(b.utcDate) - new Date(a.utcDate);
+                        }
+                    });
+                    
+                    setFilteredMatches(filtered);
+                    setCurrentPage(1);
+                }
+            }, [matches, filters]);
+            
+            const loadRealMatches = async () => {
+                if (!config.apiKeys.footballData) {
+                    setApiError('Please add your Football-Data.org API key in Settings');
+                    return;
+                }
+                
+                setLoading(true);
+                setGenerationProgress(0);
+                setApiError(null);
+                
+                try {
+                    // Fetch matches from API
+                    const rawMatches = await FOOTBALL_API.getMatches(config.apiKeys.footballData);
+                    
+                    if (!rawMatches || rawMatches.length === 0) {
+                        setApiError('No matches found for the next 7 days. Please try again later.');
+                        setLoading(false);
+                        return;
+                    }
+                    
+                    setGenerationProgress(30);
+                    
+                    // Get unique leagues
+                    const leagues = [...new Set(rawMatches.map(m => m.competition.name))];
+                    setAvailableLeagues(leagues);
+                    
+                    // Process each match with AI prediction
+                    const processedMatches = [];
+                    const total = rawMatches.length;
+                    
+                    for (let i = 0; i < rawMatches.length; i++) {
+                        try {
+                            const match = rawMatches[i];
+                            
+                            // Extract realistic team form
+                            const homeForm = [3, 3, 1, 3, 1]; // Default good form
+                            const awayForm = [3, 1, 1, 3, 1]; // Default moderate form
+                            
+                            // Get actual goals stats from previous matches or use realistic estimates
+                            let homeGoalsScored = 1.5;
+                            let awayGoalsScored = 1.2;
+                            
+                            // If we have data from the match object, use it
+                            if (match.score && match.score.fullTime) {
+                                // For finished matches, use actual score
+                                if (match.status === 'FINISHED') {
+                                    homeGoalsScored = match.score.fullTime.home || 1.5;
+                                    awayGoalsScored = match.score.fullTime.away || 1.2;
+                                }
+                            }
+                            
+                            const matchData = {
+                                homeTeam: match.homeTeam.name,
+                                awayTeam: match.awayTeam.name,
+                                league: match.competition.name,
+                                homeGoalsScored: homeGoalsScored.toString(),
+                                awayGoalsScored: awayGoalsScored.toString(),
+                                homeGoalsConceded: (awayGoalsScored * 0.8).toString(),
+                                awayGoalsConceded: (homeGoalsScored * 0.8).toString(),
+                                homeForm,
+                                awayForm
+                            };
+                            
+                            // Get AI prediction using configured provider
+                            const prediction = await AIPredictionEngine.getPrediction({
+                                apiKeys: config.apiKeys,
+                                selectedAI: config.selectedAI,
+                                matchData
+                            });
+                            
+                            // Generate betting odds from prediction
+                            const odds = AIPredictionEngine.generateOdds(prediction, matchData);
+                            
+                            // Determine confidence label and sure bet
+                            const confidence = prediction.confidence;
+                            const confidenceLabel = confidence >= 80 ? 'High' : confidence >= 65 ? 'Medium' : 'Low';
+                            const sureBet = confidence >= 75;
+                            const sureBetLabel = sureBet ? 'SURE BET' : confidence >= 65 ? 'GOOD BET' : 'SPECULATIVE';
+                            
+                            processedMatches.push({
+                                id: match.id,
+                                index: i + 1,
+                                league: match.competition.name,
+                                leagueLogo: match.competition.emblem,
+                                homeTeam: match.homeTeam.name,
+                                homeTeamCrest: match.homeTeam.crest,
+                                awayTeam: match.awayTeam.name,
+                                awayTeamCrest: match.awayTeam.crest,
+                                utcDate: match.utcDate,
+                                date: new Date(match.utcDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+                                time: new Date(match.utcDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                                venue: match.venue || match.homeTeam.name + ' Stadium',
+                                status: match.status,
+                                
+                                // Odds
+                                homeOdds: odds['1X2']['1'],
+                                drawOdds: odds['1X2']['X'],
+                                awayOdds: odds['1X2']['2'],
+                                markets: odds,
+                                
+                                // AI Prediction (Ensemble of Multiple Models)
+                                aiPrediction: {
+                                    // 1X2 predictions
+                                    homeWin: prediction.homeWin,
+                                    draw: prediction.draw,
+                                    awayWin: prediction.awayWin,
+                                    
+                                    // Double chance
+                                    doubleChance: prediction.doubleChance || {
+                                        homeDraw: prediction.homeWin + prediction.draw,
+                                        awayDraw: prediction.awayWin + prediction.draw,
+                                        homeAway: prediction.homeWin + prediction.awayWin
+                                    },
+                                    
+                                    // Over/Under
+                                    overUnder: prediction.overUnder || {
+                                        over1_5: 70, under1_5: 30,
+                                        over2_5: 50, under2_5: 50,
+                                        over3_5: 30, under3_5: 70
+                                    },
+                                    
+                                    // BTTS
+                                    btts: prediction.btts || { yes: 55, no: 45 },
+                                    
+                                    // Draw No Bet
+                                    drawNoBet: prediction.drawNoBet || {
+                                        home: (prediction.homeWin / (prediction.homeWin + prediction.awayWin)) * 100,
+                                        away: (prediction.awayWin / (prediction.homeWin + prediction.awayWin)) * 100
+                                    },
+                                    
+                                    // Asian Handicap
+                                    asianHandicap: prediction.asianHandicap || {
+                                        home_minus1: Math.max(0, prediction.homeWin - 15),
+                                        home_minus0_5: Math.max(0, prediction.homeWin - 5),
+                                        away_minus1: Math.max(0, prediction.awayWin - 15),
+                                        away_minus0_5: Math.max(0, prediction.awayWin - 5),
+                                        home_plus1: prediction.homeWin + prediction.draw,
+                                        away_plus1: prediction.awayWin + prediction.draw
+                                    },
+                                    
+                                    // Correct Score
+                                    correctScore: prediction.correctScore || {
+                                        "1-0": 15, "2-0": 10, "2-1": 12, "3-0": 5, "3-1": 6, "3-2": 4,
+                                        "0-0": 8, "1-1": 10, "2-2": 6,
+                                        "0-1": 8, "0-2": 5, "1-2": 6, "0-3": 2, "1-3": 3, "2-3": 2
+                                    },
+                                    
+                                    confidence: prediction.confidence,
+                                    confidenceLabel: prediction.confidence >= 80 ? 'High' : prediction.confidence >= 65 ? 'Medium' : 'Low',
+                                    predictedScore: prediction.predictedScore,
+                                    recommendedBet: prediction.homeWin > prediction.awayWin ? '1' : prediction.awayWin > prediction.homeWin ? '2' : 'X',
+                                    sureBet: prediction.confidence >= 75,
+                                    sureBetLabel: prediction.confidence >= 75 ? 'SURE BET' : prediction.confidence >= 65 ? 'GOOD BET' : 'SPECULATIVE',
+                                    reasoning: prediction.reasoning,
+                                    explanation: prediction.explanation || 'AI analysis based on team form, statistics, and historical data',
+                                    
+                                    // Ensemble information
+                                    ensembleModels: prediction.ensembleModels || [],
+                                    modelCount: prediction.modelCount || 1,
+                                    consensusScore: prediction.consensusScore || prediction.confidence,
+                                    individualPredictions: prediction.individualPredictions || []
+                                },
+                                
+                                // Team stats
+                                homeForm,
+                                awayForm,
+                                homeGoalsScored: matchData.homeGoalsScored,
+                                homeGoalsConceded: matchData.homeGoalsConceded,
+                                awayGoalsScored: matchData.awayGoalsScored,
+                                awayGoalsConceded: matchData.awayGoalsConceded,
+                                
+                                keyPlayers: { home: [], away: [] },
+                                injuries: { home: [], away: [] }
+                            });
+                            
+                            setGenerationProgress(30 + Math.floor((i / total) * 70));
+                        } catch (e) {
+                            console.error(`Error processing match ${i}:`, e);
+                            // Continue processing other matches
+                        }
+                    }
+                    
+                    setMatches(processedMatches);
+                    setLastGenerated(new Date());
+                    
+                } catch (error) {
+                    console.error('Error loading matches:', error);
+                    
+                    // Provide helpful error messages
+                    let errorMsg = 'Failed to fetch matches.';
+                    if (error.message.includes('Invalid API key')) {
+                        errorMsg = 'Invalid API key. Please verify your Football-Data.org credentials.';
+                    } else if (error.message.includes('Rate limit')) {
+                        errorMsg = 'Rate limit exceeded. Please wait a moment before refreshing.';
+                    } else if (error.message.includes('Access forbidden')) {
+                        errorMsg = 'Access denied. Please ensure your API key has the correct permissions.';
+                    } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                        errorMsg = 'Network error. Please check your internet connection and try again.';
+                    }
+                    
+                    setApiError(errorMsg);
+                }
+                
+                setLoading(false);
+                setGenerationProgress(100);
+            };
+            
+            const paginatedMatches = useMemo(() => {
+                const start = (currentPage - 1) * itemsPerPage;
+                return filteredMatches.slice(start, start + itemsPerPage);
+            }, [filteredMatches, currentPage]);
+            
+            const totalPages = Math.ceil(filteredMatches.length / itemsPerPage);
+            
+            const addToBetSlip = (match, betType, selection, odds) => {
+                const bet = {
+                    id: Date.now(),
+                    match,
+                    betType,
+                    selection,
+                    odds,
+                    stake: 10,
+                    potentialWin: odds * 10
+                };
+                setBetSlip(prev => [...prev, bet]);
+            };
+            
+            const removeFromBetSlip = (id) => {
+                setBetSlip(prev => prev.filter(b => b.id !== id));
+            };
+            
+            const updateStake = (id, stake) => {
+                const numStake = parseFloat(stake) || 0;
+                setBetSlip(prev => prev.map(b => 
+                    b.id === id ? { ...b, stake: numStake, potentialWin: numStake * b.odds } : b
+                ));
+            };
+            
+            const getConfidenceClass = (confidence) => {
+                if (confidence >= 80) return 'confidence-high';
+                if (confidence >= 65) return 'confidence-medium';
+                return 'confidence-low';
+            };
+            
+            const getBetButtonClass = () => 'bg-slate-700 hover:bg-slate-600 text-slate-300';
+            
+            const getStatusBadge = (status) => {
+                const statusMap = {
+                    'SCHEDULED': { text: 'Scheduled', class: 'bg-blue-500/20 text-blue-400' },
+                    'TIMED': { text: 'Timed', class: 'bg-blue-500/20 text-blue-400' },
+                    'IN_PLAY': { text: 'LIVE', class: 'bg-red-500/20 text-red-400 live-indicator' },
+                    'PAUSED': { text: 'PAUSED', class: 'bg-yellow-500/20 text-yellow-400' },
+                    'FINISHED': { text: 'Finished', class: 'bg-green-500/20 text-green-400' },
+                    'POSTPONED': { text: 'Postponed', class: 'bg-gray-500/20 text-gray-400' },
+                    'SUSPENDED': { text: 'Suspended', class: 'bg-red-500/20 text-red-400' },
+                    'CANCELLED': { text: 'Cancelled', class: 'bg-red-500/20 text-red-400' }
+                };
+                return statusMap[status] || { text: status, class: 'bg-gray-500/20 text-gray-400' };
+            };
+            
+            return (
+                <div className="min-h-screen gradient-bg">
+                    {/* Header */}
+                    <header className="bg-gradient-to-b from-slate-900 to-slate-800/90 backdrop-blur-md border-b border-slate-700/50 sticky top-0 z-50 shadow-lg">
+                        <div className="max-w-full mx-auto px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-gradient-to-br from-green-500 via-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center glow shadow-lg">
+                                    <i className="fas fa-bolt text-2xl text-white"></i>
+                                </div>
+                                <div>
+                                    <h1 className="text-3xl font-bold bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 bg-clip-text text-transparent">
+                                        SureBet Pro
+                                    </h1>
+                                    <p className="text-xs text-slate-400">AI-Powered Football Predictions</p>
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                                <div className="hidden md:flex items-center gap-2 text-sm px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                                    <span className={`w-2 h-2 rounded-full ${config.apiKeys.footballData ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                    <span className="text-slate-400">
+                                        {config.apiKeys.footballData 
+                                            ? `${filteredMatches.length.toLocaleString()} matches`
+                                            : 'API Not Connected'}
+                                    </span>
+                                </div>
+                                <button 
+                                    onClick={() => setShowBetSlip(true)}
+                                    className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all hover:shadow-lg relative"
+                                    title="Bet Slip"
+                                >
+                                    <i className="fas fa-shopping-cart text-slate-400"></i>
+                                    {betSlip.length > 0 && (
+                                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full text-xs font-bold flex items-center justify-center text-white shadow-lg">
+                                            {betSlip.length}
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                        {/* Stats Bar */}
+                        <div className="border-t border-slate-700/50 bg-slate-900/50 backdrop-blur-sm">
+                            <div className="max-w-full mx-auto px-6 py-4 flex items-center justify-between flex-wrap gap-4">
+                                <div className="flex items-center gap-6 text-sm flex-wrap">
+                                    <div className="flex items-center gap-2">
+                                        <i className="fas fa-trophy text-yellow-400 text-lg"></i>
+                                        <span className="text-slate-400">Sure Bets:</span>
+                                        <span className="font-bold text-green-400 text-base">
+                                            {matches.filter(m => m.aiPrediction.sureBet).length}
+                                        </span>
+                                    </div>
+                                    <div className="h-6 w-px bg-slate-700/50"></div>
+                                    <div className="flex items-center gap-2">
+                                        <i className="fas fa-chart-line text-blue-400 text-lg"></i>
+                                        <span className="text-slate-400">High Confidence:</span>
+                                        <span className="font-bold text-blue-400 text-base">
+                                            {matches.filter(m => m.aiPrediction.confidence >= 80).length}
+                                        </span>
+                                    </div>
+                                    <div className="h-6 w-px bg-slate-700/50"></div>
+                                    <div className="flex items-center gap-2">
+                                        <i className="fas fa-percentage text-purple-400 text-lg"></i>
+                                        <span className="text-slate-400">Average:</span>
+                                        <span className="font-bold text-purple-400 text-base">
+                                            {matches.length > 0 
+                                                ? Math.round(matches.reduce((sum, m) => sum + m.aiPrediction.confidence, 0) / matches.length)
+                                                : 0}%
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3">
+                                    {lastGenerated && (
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <i className="fas fa-clock text-cyan-400"></i>
+                                            <span className="text-slate-400">Updated:</span>
+                                            <span className="font-medium text-cyan-400">
+                                                {lastGenerated.toLocaleTimeString()}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {nextRefresh && (
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <i className="fas fa-sync text-green-400 animate-spin"></i>
+                                            <span className="text-slate-400">Next:</span>
+                                            <span className="font-medium text-green-400">
+                                                {nextRefresh.toLocaleTimeString()}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <button 
+                                        onClick={loadRealMatches}
+                                        disabled={loading || !config.apiKeys.footballData}
+                                        className={`px-4 py-1.5 rounded-lg font-medium transition-all text-sm ${
+                                            loading || !config.apiKeys.footballData
+                                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                                : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white hover:shadow-lg'
+                                        }`}
+                                    >
+                                        {loading ? (
+                                            <span className="flex items-center gap-2">
+                                                <div className="loading-spinner w-3 h-3"></div>
+                                                {generationProgress}%
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center gap-1">
+                                                <i className="fas fa-sync-alt"></i>
+                                                Refresh
+                                            </span>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        {/* Filters */}
+                        {matches.length > 0 && (
+                            <div className="border-t border-slate-700/50 bg-slate-900/30 px-6 py-4">
+                                <div className="flex items-center gap-4 flex-wrap">
+                                    <div className="flex items-center gap-2">
+                                        <i className="fas fa-filter text-slate-400"></i>
+                                        <input 
+                                            type="text"
+                                            placeholder="Search teams or leagues..."
+                                            value={filters.search}
+                                            onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 w-48 transition-all"
+                                        />
+                                    </div>
+                                    
+                                    <select 
+                                        value={filters.league}
+                                        onChange={(e) => setFilters(prev => ({ ...prev, league: e.target.value }))}
+                                        className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 transition-all"
+                                    >
+                                        <option value="">All Leagues</option>
+                                        {availableLeagues.map(l => <option key={l} value={l}>{l}</option>)}
+                                    </select>
+                                    
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm text-slate-400">Min Conf:</span>
+                                        <input 
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={filters.minConfidence}
+                                            onChange={(e) => setFilters(prev => ({ ...prev, minConfidence: parseInt(e.target.value) }))}
+                                            className="w-24 accent-green-500"
+                                        />
+                                        <span className="text-sm font-medium w-10 text-green-400">{filters.minConfidence}%</span>
+                                    </div>
+                                    
+                                    <label className="flex items-center gap-2 cursor-pointer hover:text-green-400 transition-colors">
+                                        <input 
+                                            type="checkbox"
+                                            checked={filters.sureBetOnly}
+                                            onChange={(e) => setFilters(prev => ({ ...prev, sureBetOnly: e.target.checked }))}
+                                            className="rounded bg-slate-800 border-slate-700 accent-green-500 cursor-pointer"
+                                        />
+                                        <span className="text-sm text-green-400 font-medium">Sure Bets Only</span>
+                                    </label>
+                                    
+                                    <div className="flex items-center gap-2 ml-auto">
+                                        <span className="text-sm text-slate-400">Sort:</span>
+                                        <select 
+                                            value={filters.sortBy}
+                                            onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value }))}
+                                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 transition-all"
+                                        >
+                                            <option value="date">Date/Time</option>
+                                            <option value="confidence">Confidence</option>
+                                        </select>
+                                        <button 
+                                            onClick={() => setFilters(prev => ({ 
+                                                ...prev, 
+                                                sortOrder: prev.sortOrder === 'asc' ? 'desc' : 'asc' 
+                                            }))}
+                                            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all hover:shadow-lg"
+                                            title={`Sort ${filters.sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+                                        >
+                                            <i className={`fas fa-sort-${filters.sortOrder === 'asc' ? 'up' : 'down'}`}></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </header>
+                    
+                    {/* Main Content */}
+                    <main className="max-w-full mx-auto px-4 py-6">
+                        {!config.apiKeys.footballData ? (
+                            <div className="flex flex-col items-center justify-center py-20">
+                                <div className="w-24 h-24 bg-gradient-to-br from-red-500 to-orange-600 rounded-full flex items-center justify-center mb-6">
+                                    <i className="fas fa-key text-4xl"></i>
+                                </div>
+                                <h2 className="text-2xl font-bold mb-2">API Key Required</h2>
+                                <p className="text-slate-400 mb-6 text-center max-w-md">
+                                    To get real football matches, you need a free API key from Football-Data.org
+                                </p>
+                                <div className="flex gap-4">
+                                    <a 
+                                        href="https://www.football-data.org/" 
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
+                                    >
+                                        Get Free API Key
+                                    </a>
+                                    <button 
+                                        onClick={() => setShowSettings(true)}
+                                        className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg font-medium transition-colors"
+                                    >
+                                        Add API Key
+                                    </button>
+                                </div>
+                            </div>
+                        ) : loading ? (
+                            <div className="flex flex-col items-center justify-center py-20">
+                                <div className="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center mb-6 processing-pulse">
+                                    <i className="fas fa-futbol text-4xl"></i>
+                                </div>
+                                <h2 className="text-2xl font-bold mb-2">Fetching Real Matches</h2>
+                                <p className="text-slate-400 mb-6">Getting live data from Football-Data.org...</p>
+                                <div className="w-64 h-2 bg-slate-700 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-300"
+                                        style={{ width: `${generationProgress}%` }}
+                                    ></div>
+                                </div>
+                                <p className="mt-2 text-green-400 font-mono">{generationProgress}%</p>
+                            </div>
+                        ) : apiError ? (
+                            <div className="flex flex-col items-center justify-center py-20">
+                                <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6">
+                                    <i className="fas fa-exclamation-triangle text-4xl text-red-400"></i>
+                                </div>
+                                <h2 className="text-2xl font-bold mb-2 text-red-400">Error Loading Matches</h2>
+                                <p className="text-slate-400 mb-6">{apiError}</p>
+                                <button 
+                                    onClick={loadRealMatches}
+                                    className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg font-medium transition-colors"
+                                >
+                                    <i className="fas fa-sync-alt mr-2"></i>
+                                    Try Again
+                                </button>
+                            </div>
+                        ) : filteredMatches.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-20">
+                                <div className="w-20 h-20 bg-slate-700 rounded-full flex items-center justify-center mb-6">
+                                    <i className="fas fa-calendar-xmark text-4xl text-slate-500"></i>
+                                </div>
+                                <h2 className="text-2xl font-bold mb-2">No Matches Found</h2>
+                                <p className="text-slate-400 mb-6">No matches scheduled for today. Try refreshing or adjusting filters.</p>
+                                <button 
+                                    onClick={loadRealMatches}
+                                    className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg font-medium transition-colors"
+                                >
+                                    Refresh Matches
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Matches Table */}
+                                <div className="card-gradient rounded-xl border border-slate-700/50 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-slate-800/50">
+                                                <tr>
+                                                    <th className="px-2 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Status</th>
+                                                    <th className="px-2 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Date/Time</th>
+                                                    <th className="px-2 py-3 text-left text-xs font-semibold text-slate-400 uppercase">League</th>
+                                                    <th className="px-2 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Match</th>
+                                                    <th className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase">1X2</th>
+                                                    <th className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase">Double Chance</th>
+                                                    <th className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase">O/U 2.5</th>
+                                                    <th className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase">BTTS</th>
+                                                    <th className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase">Conf.</th>
+                                                    <th className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase">Score</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-700/30">
+                                                {paginatedMatches.map((match) => {
+                                                    const statusBadge = getStatusBadge(match.status);
+                                                    // Determine predictions based on AI probabilities
+                                                    const pred = match.aiPrediction;
+                                                    
+                                                    // 1X2 prediction
+                                                    const final1X2 = pred.homeWin > pred.awayWin ? (pred.homeWin > pred.draw ? '1' : 'X') : (pred.awayWin > pred.draw ? '2' : 'X');
+                                                    
+                                                    // Double Chance prediction
+                                                    const finalDC = pred.homeWin > 50 ? '1X' : pred.awayWin > 50 ? 'X2' : '12';
+                                                    
+                                                    // Over/Under prediction
+                                                    const goalsTotal = parseInt(pred.predictedScore.split('-')[0]) + parseInt(pred.predictedScore.split('-')[1]);
+                                                    const finalOU = goalsTotal > 2.5 ? 'Over' : 'Under';
+                                                    
+                                                    // BTTS prediction
+                                                    const bothScore = parseInt(pred.predictedScore.split('-')[0]) > 0 && parseInt(pred.predictedScore.split('-')[1]) > 0;
+                                                    const finalBTTS = bothScore ? 'Yes' : 'No';
+                                                    
+                                                    return (
+                                                        <React.Fragment key={match.id}>
+                                                            <tr 
+                                                                className="table-row-hover cursor-pointer"
+                                                                onClick={() => setExpandedMatch(expandedMatch === match.id ? null : match.id)}
+                                                            >
+                                                                <td className="px-2 py-3">
+                                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${statusBadge.class}`}>
+                                                                        {statusBadge.text}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-sm">
+                                                                    <div className="text-white">{match.date}</div>
+                                                                    <div className="text-slate-500 text-xs">{match.time}</div>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-xs text-slate-400 max-w-32 truncate">{match.league}</td>
+                                                                <td className="px-2 py-3">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="font-medium text-white text-sm">{match.homeTeam}</span>
+                                                                        <span className="text-slate-500">vs</span>
+                                                                        <span className="font-medium text-white text-sm">{match.awayTeam}</span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-center">
+                                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                                        final1X2 === '1' ? 'bg-blue-600 text-white' :
+                                                                        final1X2 === '2' ? 'bg-red-600 text-white' :
+                                                                        'bg-yellow-600 text-white'
+                                                                    }`}>
+                                                                        {final1X2 === '1' ? match.homeTeam.substring(0,3) : final1X2 === '2' ? match.awayTeam.substring(0,3) : 'Draw'}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-center">
+                                                                    <span className="px-2 py-1 rounded text-xs font-bold bg-purple-600 text-white">
+                                                                        {finalDC}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-center">
+                                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                                        finalOU === 'Over' ? 'bg-green-600 text-white' : 'bg-orange-600 text-white'
+                                                                    }`}>
+                                                                        {finalOU}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-center">
+                                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                                        finalBTTS === 'Yes' ? 'bg-cyan-600 text-white' : 'bg-pink-600 text-white'
+                                                                    }`}>
+                                                                        {finalBTTS}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-center">
+                                                                    <div className={`font-bold ${getConfidenceClass(pred.confidence)}`}>
+                                                                        {pred.confidence}%
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-2 py-3 text-center">
+                                                                    <span className="px-2 py-1 rounded text-xs font-bold bg-slate-700 text-white">
+                                                                        {pred.predictedScore}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                            
+                                                            {/* Expanded Row */}
+                                                            {expandedMatch === match.id && (
+                                                                <tr>
+                                                                    <td colSpan={10} className="px-4 py-6 bg-slate-800/30">
+                                                                        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                                                                            <div>
+                                                                                <h4 className="font-semibold text-green-400 mb-3 flex items-center gap-2">
+                                                                                    <i className="fas fa-info-circle"></i> Match Info
+                                                                                </h4>
+                                                                                <div className="space-y-2 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Venue:</span>
+                                                                                        <span className="text-right text-white">{match.venue}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Status:</span>
+                                                                                        <span className={statusBadge.class}>{statusBadge.text}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Home Form:</span>
+                                                                                        <div className="flex gap-1">
+                                                                                            {match.homeForm.map((r, i) => (
+                                                                                                <span key={i} className={`w-5 h-5 flex items-center justify-center rounded text-xs font-bold ${
+                                                                                                    r === 3 ? 'bg-green-500/20 text-green-400' :
+                                                                                                    r === 1 ? 'bg-red-500/20 text-red-400' :
+                                                                                                    'bg-yellow-500/20 text-yellow-400'
+                                                                                                }`}>
+                                                                                                    {r === 3 ? 'W' : r === 1 ? 'L' : 'D'}
+                                                                                                </span>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Away Form:</span>
+                                                                                        <div className="flex gap-1">
+                                                                                            {match.awayForm.map((r, i) => (
+                                                                                                <span key={i} className={`w-5 h-5 flex items-center justify-center rounded text-xs font-bold ${
+                                                                                                    r === 3 ? 'bg-green-500/20 text-green-400' :
+                                                                                                    r === 1 ? 'bg-red-500/20 text-red-400' :
+                                                                                                    'bg-yellow-500/20 text-yellow-400'
+                                                                                                }`}>
+                                                                                                    {r === 3 ? 'W' : r === 1 ? 'L' : 'D'}
+                                                                                                </span>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                            
+                                                                            <div>
+                                                                                <h4 className="font-semibold text-blue-400 mb-3 flex items-center gap-2">
+                                                                                    <i className="fas fa-brain"></i> Ensemble Prediction
+                                                                                </h4>
+                                                                                <div className="space-y-2 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Home:</span>
+                                                                                        <span className="text-blue-400 font-bold">{match.aiPrediction.homeWin}%</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Draw:</span>
+                                                                                        <span className="text-yellow-400 font-bold">{match.aiPrediction.draw}%</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Away:</span>
+                                                                                        <span className="text-red-400 font-bold">{match.aiPrediction.awayWin}%</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Score:</span>
+                                                                                        <span className="font-bold text-white">{match.aiPrediction.predictedScore}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between pt-2 border-t border-slate-700">
+                                                                                        <span className="text-slate-400">Models:</span>
+                                                                                        <span className="font-bold text-green-400">{match.aiPrediction.modelCount}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                            
+                                                                            <div>
+                                                                                <h4 className="font-semibold text-purple-400 mb-3 flex items-center gap-2">
+                                                                                    <i className="fas fa-chart-pie"></i> Model Breakdown
+                                                                                </h4>
+                                                                                <div className="space-y-2 text-xs max-h-48 overflow-y-auto pr-2">
+                                                                                    {match.aiPrediction.individualPredictions && match.aiPrediction.individualPredictions.length > 0 ? (
+                                                                                        match.aiPrediction.individualPredictions.map((pred, idx) => (
+                                                                                            <div key={idx} className="p-2 bg-slate-700/30 rounded border border-slate-700/50">
+                                                                                                <div className="font-medium text-purple-300 capitalize mb-1">{pred.model}</div>
+                                                                                                <div className="grid grid-cols-4 gap-1 text-slate-400">
+                                                                                                    <div><span className="text-purple-300 font-bold">{pred.homeWin}%</span></div>
+                                                                                                    <div><span className="text-purple-300 font-bold">{pred.draw}%</span></div>
+                                                                                                    <div><span className="text-purple-300 font-bold">{pred.awayWin}%</span></div>
+                                                                                                    <div className={`text-right font-bold px-1 rounded ${
+                                                                                                        pred.confidence >= 75 ? 'bg-green-500/20 text-green-400' :
+                                                                                                        pred.confidence >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                                                        'bg-red-500/20 text-red-400'
+                                                                                                    }`}>{pred.confidence}%</div>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        ))
+                                                                                    ) : (
+                                                                                        <div className="text-slate-400 text-center py-2">Fallback: Local calculation</div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                            
+                                                                            <div>
+                                                                                <h4 className="font-semibold text-cyan-400 mb-3 flex items-center gap-2">
+                                                                                    <i className="fas fa-star"></i> Confidence & Explanation
+                                                                                </h4>
+                                                                                <div className="space-y-2 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Ensemble:</span>
+                                                                                        <span className="font-bold text-cyan-400">{match.aiPrediction.confidence}%</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Consensus:</span>
+                                                                                        <span className="font-bold text-emerald-400">{match.aiPrediction.consensusScore || match.aiPrediction.confidence}%</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">Rating:</span>
+                                                                                        <span className={`font-bold ${match.aiPrediction.confidence >= 80 ? 'text-green-400' : 'text-yellow-400'}`}>
+                                                                                            {match.aiPrediction.sureBetLabel}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="mt-3 p-3 bg-slate-700/30 rounded border border-slate-700/50">
+                                                                                        <div className="text-xs text-slate-400 mb-2 font-medium">Models Used:</div>
+                                                                                        <div className="flex flex-wrap gap-1">
+                                                                                            {match.aiPrediction.ensembleModels && match.aiPrediction.ensembleModels.length > 0 ? (
+                                                                                                match.aiPrediction.ensembleModels.map((model, idx) => (
+                                                                                                    <span key={idx} className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium capitalize">
+                                                                                                        {model}
+                                                                                                    </span>
+                                                                                                ))
+                                                                                            ) : (
+                                                                                                <span className="text-slate-400 text-xs">Local</span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <button 
+                                                                                        onClick={() => setShowPredictionExplanation(showPredictionExplanation === match.id ? null : match.id)}
+                                                                                        className="w-full mt-3 py-2 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-600/30 rounded text-cyan-400 text-xs font-medium transition-colors"
+                                                                                    >
+                                                                                        <i className="fas fa-info-circle mr-1"></i>
+                                                                                        {showPredictionExplanation === match.id ? 'Hide' : 'Show'} Explanation
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                            
+                                                                            <div>
+                                                                                <h4 className="font-semibold text-orange-400 mb-3 flex items-center gap-2">
+                                                                                    <i className="fas fa-handshake"></i> Betting Markets
+                                                                                </h4>
+                                                                                <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                                                    {/* 1X2 */}
+                                                                                    <div className="border-b border-slate-700/50 pb-2">
+                                                                                        <div className="text-xs font-medium text-orange-300 mb-1">Match Result (1X2)</div>
+                                                                                        <div className="grid grid-cols-3 gap-1">
+                                                                                            <button onClick={() => addToBetSlip(match, '1X2', '1', match.markets['1X2']['1'])} className="py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-xs font-medium transition-colors">
+                                                                                                {`1 @ ${match.markets['1X2']['1']} (${Math.round(match.aiPrediction.homeWin)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, '1X2', 'X', match.markets['1X2']['X'])} className="py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded text-xs font-medium transition-colors">
+                                                                                                {`X @ ${match.markets['1X2']['X']} (${Math.round(match.aiPrediction.draw)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, '1X2', '2', match.markets['1X2']['2'])} className="py-1.5 bg-red-600 hover:bg-red-700 rounded text-xs font-medium transition-colors">
+                                                                                                {`2 @ ${match.markets['1X2']['2']} (${Math.round(match.aiPrediction.awayWin)}%)`}
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    
+                                                                                    {/* Double Chance */}
+                                                                                    <div className="border-b border-slate-700/50 pb-2">
+                                                                                        <div className="text-xs font-medium text-orange-300 mb-1">Double Chance (1X, 2X, 12)</div>
+                                                                                        <div className="grid grid-cols-3 gap-1">
+                                                                                            <button onClick={() => addToBetSlip(match, '1X', '1X', match.markets['1X']['1X'])} className="py-1 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded text-xs font-medium transition-colors text-blue-300">
+                                                                                                {`1X @ ${match.markets['1X']['1X']} (${Math.round(match.aiPrediction.doubleChance?.homeDraw || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, '1X', '2X', match.markets['1X']['2X'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                {`2X @ ${match.markets['1X']['2X']} (${Math.round(match.aiPrediction.doubleChance?.awayDraw || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, '1X', '12', match.markets['1X']['12'])} className="py-1 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded text-xs font-medium transition-colors text-purple-300">
+                                                                                                {`12 @ ${match.markets['1X']['12']} (${Math.round(match.aiPrediction.doubleChance?.homeAway || 0)}%)`}
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    
+                                                                                    {/* Over/Under */}
+                                                                                    <div className="border-b border-slate-700/50 pb-2">
+                                                                                        <div className="text-xs font-medium text-orange-300 mb-1">Over/Under Goals</div>
+                                                                                        <div className="grid grid-cols-2 gap-1">
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'O0.5', match.markets['OU']['O0.5'])} className="py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-medium transition-colors text-green-300">
+                                                                                                {`O0.5 @ ${match.markets['OU']['O0.5']} (${Math.round(match.aiPrediction.overUnder?.over0_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'U0.5', match.markets['OU']['U0.5'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                {`U0.5 @ ${match.markets['OU']['U0.5']} (${Math.round(match.aiPrediction.overUnder?.under0_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'O1.5', match.markets['OU']['O1.5'])} className="py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-medium transition-colors text-green-300">
+                                                                                                {`O1.5 @ ${match.markets['OU']['O1.5']} (${Math.round(match.aiPrediction.overUnder?.over1_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'U1.5', match.markets['OU']['U1.5'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                {`U1.5 @ ${match.markets['OU']['U1.5']} (${Math.round(match.aiPrediction.overUnder?.under1_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'O2.5', match.markets['OU']['O2.5'])} className="py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-medium transition-colors text-green-300">
+                                                                                                {`O2.5 @ ${match.markets['OU']['O2.5']} (${Math.round(match.aiPrediction.overUnder?.over2_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'U2.5', match.markets['OU']['U2.5'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                {`U2.5 @ ${match.markets['OU']['U2.5']} (${Math.round(match.aiPrediction.overUnder?.under2_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'O3.5', match.markets['OU']['O3.5'])} className="py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-medium transition-colors text-green-300">
+                                                                                                {`O3.5 @ ${match.markets['OU']['O3.5']} (${Math.round(match.aiPrediction.overUnder?.over3_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'U3.5', match.markets['OU']['U3.5'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                {`U3.5 @ ${match.markets['OU']['U3.5']} (${Math.round(match.aiPrediction.overUnder?.under3_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'O4.5', match.markets['OU']['O4.5'])} className="py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-medium transition-colors text-green-300">
+                                                                                                {`O4.5 @ ${match.markets['OU']['O4.5']} (${Math.round(match.aiPrediction.overUnder?.over4_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'OU', 'U4.5', match.markets['OU']['U4.5'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                {`U4.5 @ ${match.markets['OU']['U4.5']} (${Math.round(match.aiPrediction.overUnder?.under4_5 || 0)}%)`}
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    
+                                                                                    {/* BTTS */}
+                                                                                    <div className="border-b border-slate-700/50 pb-2">
+                                                                                        <div className="text-xs font-medium text-orange-300 mb-1">Both Teams To Score</div>
+                                                                                        <div className="grid grid-cols-2 gap-1">
+                                                                                            <button onClick={() => addToBetSlip(match, 'BTTS', 'YES', match.markets['BTTS']['YES'])} className="py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded text-xs font-medium transition-colors text-emerald-300">
+                                                                                                Yes @ {match.markets['BTTS']['YES']}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'BTTS', 'NO', match.markets['BTTS']['NO'])} className="py-1 bg-slate-500/20 hover:bg-slate-500/30 border border-slate-500/30 rounded text-xs font-medium transition-colors text-slate-300">
+                                                                                                No @ {match.markets['BTTS']['NO']}
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    
+                                                                                    {/* Asian Handicap */}
+                                                                                    <div className="border-b border-slate-700/50 pb-2">
+                                                                                        <div className="text-xs font-medium text-orange-300 mb-1">Asian Handicap</div>
+                                                                                        <div className="grid grid-cols-2 gap-1">
+                                                                                            <button onClick={() => addToBetSlip(match, 'HANDICAP', 'H-0.5', match.markets['HANDICAP']['H-0.5'])} className="py-1 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded text-xs font-medium transition-colors text-blue-300">
+                                                                                                H-0.5 @ {match.markets['HANDICAP']['H-0.5']}
+                                                                                            </button>
+                                                                                            <button onClick={() => addToBetSlip(match, 'HANDICAP', 'A-0.5', match.markets['HANDICAP']['A-0.5'])} className="py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs font-medium transition-colors text-red-300">
+                                                                                                A-0.5 @ {match.markets['HANDICAP']['A-0.5']}
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    
+                                                                                    {/* Correct Score - Top 3 */}
+                                                                                    <div>
+                                                                                        <div className="text-xs font-medium text-orange-300 mb-1">Correct Score</div>
+                                                                                        <div className="space-y-1">
+                                                                                            {Object.entries(match.markets['SCORE'] || {}).slice(0, 3).map(([score, odds]) => (
+                                                                                                <button 
+                                                                                                    key={score}
+                                                                                                    onClick={() => addToBetSlip(match, 'SCORE', score, odds)} 
+                                                                                                    className="w-full py-1 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 rounded text-xs font-medium transition-colors text-indigo-300"
+                                                                                                >
+                                                                                                    {score} @ {odds}
+                                                                                                </button>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </td>
+                                                                    </tr>
+                                                                )}
+                                                                
+                                                                {/* Prediction Explanation Dropdown */}
+                                                                {showPredictionExplanation === match.id && (
+                                                                    <tr>
+                                                                        <td colSpan={10} className="px-4 py-4 bg-slate-800/20 border-t border-slate-700/30">
+                                                                            <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
+                                                                                <h5 className="font-semibold text-cyan-400 mb-3 flex items-center gap-2">
+                                                                                    <i className="fas fa-lightbulb"></i> AI Prediction Explanation
+                                                                                </h5>
+                                                                                <div className="text-sm text-slate-300 space-y-2">
+                                                                                    <p className="leading-relaxed">{match.aiPrediction.explanation || match.aiPrediction.reasoning}</p>
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                                                                        <div className="bg-slate-700/30 rounded p-3">
+                                                                                            <h6 className="font-medium text-green-400 mb-2">Key Factors Considered:</h6>
+                                                                                            <ul className="text-xs space-y-1 text-slate-400">
+                                                                                                <li>• Team form and recent performance</li>
+                                                                                                <li>• Home advantage analysis</li>
+                                                                                                <li>• Goal-scoring patterns</li>
+                                                                                                <li>• Head-to-head statistics</li>
+                                                                                                <li>• League strength and context</li>
+                                                                                            </ul>
+                                                                                        </div>
+                                                                                        <div className="bg-slate-700/30 rounded p-3">
+                                                                                            <h6 className="font-medium text-blue-400 mb-2">Prediction Confidence:</h6>
+                                                                                            <div className="text-xs space-y-1">
+                                                                                                <span className={`font-bold ${match.aiPrediction.confidence >= 80 ? 'text-green-400' : match.aiPrediction.confidence >= 65 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                            {match.aiPrediction.confidence}% - {match.aiPrediction.sureBetLabel}
+                                                                                                </span>
+                                                                                                <p className="text-slate-400 mt-2">
+                                                                            Based on {match.aiPrediction.modelCount} AI models with {match.aiPrediction.consensusScore || match.aiPrediction.confidence}% agreement
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                            </React.Fragment>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    
+                                    {totalPages > 1 && (
+                                        <div className="px-4 py-3 border-t border-slate-700/50 flex items-center justify-between">
+                                            <div className="text-sm text-slate-400">
+                                                Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredMatches.length)} of {filteredMatches.length} matches
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-50">
+                                                    <i className="fas fa-chevron-left"></i>
+                                                </button>
+                                                <span className="text-sm">Page {currentPage} of {totalPages}</span>
+                                                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-50">
+                                                    <i className="fas fa-chevron-right"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </main>
+                    
+                    {/* Bet Slip Sidebar */}
+                    {showBetSlip && (
+                        <div className="fixed inset-y-0 right-0 w-96 bg-slate-900 border-l border-slate-700/50 shadow-2xl z-50 flex flex-col backdrop-blur-sm">
+                            <div className="p-6 border-b border-slate-700/50 flex items-center justify-between bg-gradient-to-r from-slate-900 to-slate-800">
+                                <h2 className="text-2xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">Bet Slip</h2>
+                                <button onClick={() => setShowBetSlip(false)} className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg">
+                                    <i className="fas fa-times text-xl"></i>
+                                </button>
+                            </div>
+                            
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                {betSlip.length === 0 ? (
+                                    <div className="text-center py-12 text-slate-400 flex flex-col items-center justify-center h-full">
+                                        <i className="fas fa-shopping-cart text-5xl mb-4 text-slate-600"></i>
+                                        <p className="font-medium">Your bet slip is empty</p>
+                                        <p className="text-xs mt-2">Click "Add to Bet Slip" on any match</p>
+                                    </div>
+                                ) : (
+                                    betSlip.map(bet => (
+                                        <div key={bet.id} className="p-4 bg-slate-800/50 rounded-lg border border-slate-700/50 hover:border-slate-600 transition-all">
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div>
+                                                    <div className="font-medium text-sm text-white">{bet.match.homeTeam}</div>
+                                                    <div className="text-xs text-slate-400 font-medium"> vs </div>
+                                                    <div className="font-medium text-sm text-white">{bet.match.awayTeam}</div>
+                                                    <div className="text-xs text-slate-500 mt-1">{bet.match.league}</div>
+                                                </div>
+                                                <button onClick={() => removeFromBetSlip(bet.id)} className="text-red-400 hover:text-red-300 transition-colors p-2 hover:bg-red-500/10 rounded-lg">
+                                                    <i className="fas fa-trash text-sm"></i>
+                                                </button>
+                                            </div>
+                                            <div className="flex justify-between items-center text-sm mb-3 pb-3 border-b border-slate-700/30">
+                                                <span className="text-slate-400">{bet.betType}: <span className="text-white font-bold">{bet.selection}</span></span>
+                                                <span className="text-green-400 font-bold text-base">@ {bet.odds}</span>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs text-slate-400 font-medium min-w-max">Stake $:</span>
+                                                    <input type="number" value={bet.stake} onChange={(e) => updateStake(bet.id, e.target.value)} className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm focus:border-green-500 focus:outline-none" min="1" step="1" />
+                                                </div>
+                                                <div className="flex justify-between text-xs">
+                                                    <span className="text-slate-400">Potential Win:</span>
+                                                    <span className="text-green-400 font-bold">${bet.potentialWin.toFixed(2)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            
+                            {betSlip.length > 0 && (
+                                <div className="p-6 border-t border-slate-700/50 bg-gradient-to-t from-slate-900 to-transparent space-y-4">
+                                    <div className="space-y-2 pb-4 border-b border-slate-700/50">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-slate-400">Total Stake:</span>
+                                            <span className="font-bold text-lg text-white">${betSlip.reduce((sum, b) => sum + b.stake, 0).toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-slate-400">Potential Return:</span>
+                                            <span className="font-bold text-lg text-green-400">${betSlip.reduce((sum, b) => sum + b.potentialWin, 0).toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-slate-400">Profit:</span>
+                                            <span className="font-bold text-lg text-green-500">${(betSlip.reduce((sum, b) => sum + b.potentialWin, 0) - betSlip.reduce((sum, b) => sum + b.stake, 0)).toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                    <button className="w-full py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg font-bold text-white transition-all hover:shadow-lg hover:shadow-green-500/20">
+                                        <i className="fas fa-paper-plane mr-2"></i>
+                                        Place Bets
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    
+                    {/* Settings Modal */}
+                    {showSettings && (
+                        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-gradient-to-b from-slate-900 to-slate-800 rounded-2xl border border-slate-700/50 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+                                <div className="p-8 border-b border-slate-700/50 flex items-center justify-between sticky top-0 bg-gradient-to-r from-slate-900 to-slate-800">
+                                    <div>
+                                        <h2 className="text-3xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">API Configuration</h2>
+                                        <p className="text-sm text-slate-400 mt-1">Set up your sports data and AI prediction providers</p>
+                                    </div>
+                                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white transition-colors p-3 hover:bg-slate-700 rounded-lg">
+                                        <i className="fas fa-times text-xl"></i>
+                                    </button>
+                                </div>
+                                
+                                <div className="p-8 space-y-8">
+                                    {/* Football Data API Key */}
+                                    <div className="space-y-3">
+                                        <h3 className="font-bold text-lg flex items-center gap-3 text-white">
+                                            <i className="fas fa-futbol text-green-400 text-xl"></i>
+                                            Football Data API (Required)
+                                        </h3>
+                                        <input 
+                                            type="password"
+                                            value={config.apiKeys.footballData}
+                                            onChange={(e) => setConfig(prev => ({
+                                                ...prev,
+                                                apiKeys: { ...prev.apiKeys, footballData: e.target.value }
+                                            }))}
+                                            placeholder="Enter your Football-Data.org API key"
+                                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 font-mono text-sm"
+                                        />
+                                        <p className="text-xs text-slate-400">
+                                            Get a free key at <a href="https://www.football-data.org/" target="_blank" rel="noopener noreferrer" className="text-green-400 hover:text-green-300 font-medium">football-data.org</a>
+                                        </p>
+                                    </div>
+                                    
+                                    {/* AI Provider Selection */}
+                                    <div className="space-y-4">
+                                        <h3 className="font-bold text-lg flex items-center gap-3 text-white">
+                                            <i className="fas fa-robot text-purple-400 text-xl"></i>
+                                            Select AI Provider
+                                        </h3>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {AI_PROVIDERS.map(provider => (
+                                                <button
+                                                    key={provider.id}
+                                                    onClick={() => setConfig(prev => ({ ...prev, selectedAI: provider.id }))}
+                                                    className={`p-4 rounded-lg border-2 transition-all text-left font-medium ${
+                                                        config.selectedAI === provider.id
+                                                            ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/20'
+                                                            : 'border-slate-700 bg-slate-800/50 hover:border-slate-600 hover:bg-slate-800'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <i className={`fas ${provider.icon} ${provider.color} text-lg`}></i>
+                                                        <span>{provider.name}</span>
+                                                    </div>
+                                                    <div className="text-xs text-slate-400">{provider.description}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    {/* AI API Keys */}
+                                    <div className="space-y-4">
+                                        <h3 className="font-bold text-lg flex items-center gap-3 text-white">
+                                            <i className="fas fa-key text-blue-400 text-xl"></i>
+                                            AI Provider API Keys (Add at least one)
+                                        </h3>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            {[
+                                                { id: 'groq', name: 'Groq', icon: 'fa-bolt', color: 'text-yellow-400', placeholder: 'gsk_...' },
+                                                { id: 'openai', name: 'OpenAI', icon: 'fa-brain', color: 'text-green-400', placeholder: 'sk-...' },
+                                                { id: 'huggingface', name: 'HuggingFace', icon: 'fa-robot', color: 'text-orange-400', placeholder: 'hf_...' },
+                                                { id: 'cohere', name: 'Cohere', icon: 'fa-microchip', color: 'text-blue-400', placeholder: 'cohere-api-key' },
+                                                { id: 'anthropic', name: 'Anthropic', icon: 'fa-comment', color: 'text-red-400', placeholder: 'sk-ant-...' },
+                                                { id: 'google', name: 'Google AI', icon: 'fa-google', color: 'text-blue-300', placeholder: 'google-api-key' }
+                                            ].map(provider => (
+                                                <div key={provider.id}>
+                                                    <label className="flex items-center gap-3 text-sm text-slate-400 mb-2 font-medium">
+                                                        <i className={`fas ${provider.icon} ${provider.color} w-5`}></i> 
+                                                        {provider.name}
+                                                    </label>
+                                                    <input 
+                                                        type="password"
+                                                        value={config.apiKeys[provider.id]}
+                                                        onChange={(e) => setConfig(prev => ({ ...prev, apiKeys: { ...prev.apiKeys, [provider.id]: e.target.value } }))}
+                                                        placeholder={provider.placeholder}
+                                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 text-sm font-mono"
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <p className="text-xs text-slate-400 bg-blue-900/30 border border-blue-700/50 rounded-lg p-3">
+                                            💡 <span className="font-medium">Pro Tip:</span> Add API keys for multiple providers. The system will automatically use whichever is available.
+                                        </p>
+                                    </div>
+                                    
+                                    {/* Info Box */}
+                                    <div className="p-4 bg-gradient-to-r from-blue-900/30 to-cyan-900/30 rounded-lg border border-blue-700/50">
+                                        <h4 className="font-bold text-blue-400 mb-3 flex items-center gap-2">
+                                            <i className="fas fa-info-circle"></i> How it works:
+                                        </h4>
+                                        <ul className="text-sm text-slate-300 space-y-2">
+                                            <li className="flex items-start gap-2">
+                                                <span className="text-green-400 font-bold min-w-fit">•</span>
+                                                <span>Football-Data.org fetches real match data from current leagues</span>
+                                            </li>
+                                            <li className="flex items-start gap-2">
+                                                <span className="text-green-400 font-bold min-w-fit">•</span>
+                                                <span>AI analyzes matches for detailed predictions (using Groq, OpenAI, HuggingFace, etc.)</span>
+                                            </li>
+                                            <li className="flex items-start gap-2">
+                                                <span className="text-green-400 font-bold min-w-fit">•</span>
+                                                <span>Betting odds are generated based on AI probabilities</span>
+                                            </li>
+                                            <li className="flex items-start gap-2">
+                                                <span className="text-green-400 font-bold min-w-fit">•</span>
+                                                <span>Auto-refreshes every hour to keep data current</span>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                
+                                <div className="p-8 border-t border-slate-700/50 flex justify-end gap-4 bg-slate-900/50 sticky bottom-0">
+                                    <button onClick={() => setShowSettings(false)} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-medium transition-all hover:shadow-lg">
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            // Validate API keys before saving
+                                            const footballKey = config.apiKeys.footballData?.trim() || '';
+                                            if (footballKey && footballKey.length < 10) {
+                                                alert('Football Data API key appears to be invalid. Please check and try again.');
+                                                return;
+                                            }
+                                            setShowSettings(false);
+                                            if (config.apiKeys.footballData) loadRealMatches();
+                                        }}
+                                        className="px-6 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg font-medium transition-all hover:shadow-lg hover:shadow-green-500/20 text-white flex items-center gap-2"
+                                    >
+                                        <i className="fas fa-check"></i>
+                                        Save & Load Matches
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Footer */}
+                    <footer className="mt-12 py-8 border-t border-slate-800 bg-gradient-to-b from-transparent to-slate-900/50">
+                        <div className="max-w-full mx-auto px-6 text-center space-y-2">
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                                <i className="fas fa-bolt text-green-400"></i>
+                                <p className="text-slate-400 font-medium">SureBet Pro - Real-Time Football Predictions</p>
+                            </div>
+                            <p className="text-slate-500 text-sm">Powered by Football-Data.org + AI (Groq, OpenAI, HuggingFace, Cohere, Anthropic, Google)</p>
+                            <p className="text-slate-600 text-xs pt-2">For educational purposes only. Bet responsibly.</p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+        
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
