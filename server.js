@@ -83,8 +83,11 @@ app.get('/api/football-data/matches', async (req, res) => {
     console.log('Football API success, matches count:', data.matches?.length || 0);
     return res.json(data);
   } catch (error) {
-    console.error('Failed to proxy Football-Data request:', error);
-    return res.status(502).json({ error: 'Failed to fetch Football-Data.org' });
+    console.error('Failed to proxy Football-Data request:', error.message, error.stack);
+    return res.status(502).json({ 
+      error: 'Failed to fetch Football-Data.org',
+      details: error.message 
+    });
   }
 });
 
