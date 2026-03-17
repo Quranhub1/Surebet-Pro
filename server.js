@@ -4,6 +4,17 @@ const path = require('path');
 const fs = require('fs');
 const app = express();
 
+// Enable CORS for all routes
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Serve static files
 app.use(express.static(path.join(__dirname, '.')));
 
@@ -28,6 +39,47 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     service: 'SureBet Pro'
   });
+});
+
+// Proxy endpoint for Football-Data.org (avoids CORS issues and keeps API key secret)
+app.get('/api/football-data/matches', async (req, res) => {
+  console.log('Proxy request received:', req.query);
+  const apiKey = process.env.FOOTBALL_DATA_API_KEY;
+  console.log('API Key available:', apiKey ? 'YES (length: ' + apiKey.length + ')' : 'NO');
+  
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Server is missing FOOTBALL_DATA_API_KEY' });
+  }
+
+  const baseUrl = 'https://api.football-data.org/v4/matches';
+  const { dateFrom, dateTo } = req.query;
+  const url = new URL(baseUrl);
+
+  if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
+  if (dateTo) url.searchParams.set('dateTo', dateTo);
+  url.searchParams.set('status', 'SCHEDULED,TIMED,IN_PLAY');
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-Auth-Token': apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).json({
+        error: `Football-Data API responded with ${response.status}: ${text}`
+      });
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (error) {
+    console.error('Failed to proxy Football-Data request:', error);
+    return res.status(502).json({ error: 'Failed to fetch Football-Data.org' });
+  }
 });
 
 // Serve index.html with environment variables injected

@@ -263,98 +263,40 @@
         ];
         
         // ============================================
-        // REAL FOOTBALL API SERVICE
+        // REAL FOOTBALL API SERVICE (proxied via server to avoid CORS and keep the API key secret)
         // ============================================
         
         const FOOTBALL_API = {
-            baseUrl: 'https://api.football-data.org/v4',
-            corsProxy: 'https://corsproxy.io/?',
-            
-            // Fetch today's matches
+            // Fetch today's matches via the server proxy
             getMatches: async (apiKey, date = null) => {
                 const now = new Date();
                 const targetDate = date || now.toISOString().split('T')[0];
-                
+
                 // Fetch for a 7-day window to get more matches
                 const endDate = new Date(now);
                 endDate.setDate(endDate.getDate() + 7);
                 const endDateStr = endDate.toISOString().split('T')[0];
-                
+
                 try {
-                    const url = `${FOOTBALL_API.baseUrl}/matches?dateFrom=${targetDate}&dateTo=${endDateStr}&status=SCHEDULED,TIMED,IN_PLAY`;
-                    const response = await fetch(url, {
-                        headers: { 
-                            'X-Auth-Token': apiKey,
-                            'Content-Type': 'application/json'
-                        },
-                        mode: 'cors',
+                    const url = new URL('/api/football-data/matches', window.location.origin);
+                    url.searchParams.set('dateFrom', targetDate);
+                    url.searchParams.set('dateTo', endDateStr);
+
+                    const response = await fetch(url.toString(), {
                         cache: 'no-cache'
                     });
-                    
+
                     if (!response.ok) {
-                        if (response.status === 401) {
-                            throw new Error('Invalid API key. Please check your Football-Data.org credentials.');
-                        } else if (response.status === 429) {
-                            throw new Error('Rate limit exceeded. Please try again in a moment.');
-                        } else if (response.status === 403) {
-                            throw new Error('Access forbidden. Your API key may not have the required permissions.');
-                        }
-                        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                        const errorText = await response.text();
+                        throw new Error(`API Error: ${response.status} - ${errorText}`);
                     }
-                    
+
                     const data = await response.json();
-                    return (data.matches || []).slice(0, 100); // Limit to 100 matches
+                    return (data.matches || []).slice(0, 100);
                 } catch (e) {
                     console.error('Football API Error:', e.message);
                     throw new Error(`Failed to fetch matches: ${e.message}`);
                 }
-            },
-            
-            // Fetch competition teams
-            getCompetition: async (apiKey, competitionCode = 'PL') => {
-                const url = `${FOOTBALL_API.baseUrl}/competitions/${competitionCode}`;
-                
-                const response = await fetch(FOOTBALL_API.corsProxy + encodeURIComponent(url), {
-                    headers: { 'X-Auth-Token': apiKey }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`API Error: ${response.status}`);
-                }
-                
-                return await response.json();
-            },
-            
-            // Fetch head-to-head
-            getHeadToHead: async (apiKey, matchId) => {
-                const url = `${FOOTBALL_API.baseUrl}/matches/${matchId}/head2head?limit=10`;
-                
-                const response = await fetch(url, {
-                    headers: { 'X-Auth-Token': apiKey }
-                });
-                
-                if (!response.ok) {
-                    return [];
-                }
-                
-                const data = await response.json();
-                return data.matches || [];
-            },
-            
-            // Get all available competitions
-            getCompetitions: async (apiKey) => {
-                const url = `${FOOTBALL_API.baseUrl}/competitions`;
-                
-                const response = await fetch(FOOTBALL_API.corsProxy + encodeURIComponent(url), {
-                    headers: { 'X-Auth-Token': apiKey }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`API Error: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                return data.competitions || [];
             }
         };
         
