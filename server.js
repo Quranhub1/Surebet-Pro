@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const app = express();
 
 // Enable CORS for all routes
@@ -62,25 +63,40 @@ app.get('/api/football-data/matches', async (req, res) => {
 
   try {
     console.log('Fetching from Football API:', url.toString());
-    const response = await fetch(url.toString(), {
-      headers: {
-        'X-Auth-Token': apiKey,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    console.log('Football API response status:', response.status);
     
-    if (!response.ok) {
-      const text = await response.text();
-      console.error('Football API error response:', text);
-      return res.status(response.status).json({
-        error: `Football-Data API responded with ${response.status}: ${text}`
+    // Use https module instead of fetch for better compatibility
+    const data = await new Promise((resolve, reject) => {
+      const req = https.get(url.toString(), {
+        headers: {
+          'X-Auth-Token': apiKey,
+          'Content-Type': 'application/json'
+        }
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          console.log('Football API response status:', res.statusCode);
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const json = JSON.parse(body);
+              console.log('Football API success, matches count:', json.matches?.length || 0);
+              resolve(json);
+            } catch (e) {
+              reject(new Error('Invalid JSON response: ' + body));
+            }
+          } else {
+            reject(new Error(`Football-Data API responded with ${res.statusCode}: ${body}`));
+          }
+        });
       });
-    }
-
-    const data = await response.json();
-    console.log('Football API success, matches count:', data.matches?.length || 0);
+      
+      req.on('error', reject);
+      req.setTimeout(10000, () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+    });
+    
     return res.json(data);
   } catch (error) {
     console.error('Failed to proxy Football-Data request:', error.message, error.stack);
