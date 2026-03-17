@@ -37,7 +37,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    service: 'SureBet Pro'
+    service: 'SureBet Pro',
+    apiKeySet: !!process.env.FOOTBALL_DATA_API_KEY
   });
 });
 
