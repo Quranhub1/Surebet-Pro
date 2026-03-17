@@ -60,6 +60,7 @@ app.get('/api/football-data/matches', async (req, res) => {
   url.searchParams.set('status', 'SCHEDULED,TIMED,IN_PLAY');
 
   try {
+    console.log('Fetching from Football API:', url.toString());
     const response = await fetch(url.toString(), {
       headers: {
         'X-Auth-Token': apiKey,
@@ -67,14 +68,18 @@ app.get('/api/football-data/matches', async (req, res) => {
       }
     });
 
+    console.log('Football API response status:', response.status);
+    
     if (!response.ok) {
       const text = await response.text();
+      console.error('Football API error response:', text);
       return res.status(response.status).json({
         error: `Football-Data API responded with ${response.status}: ${text}`
       });
     }
 
     const data = await response.json();
+    console.log('Football API success, matches count:', data.matches?.length || 0);
     return res.json(data);
   } catch (error) {
     console.error('Failed to proxy Football-Data request:', error);
