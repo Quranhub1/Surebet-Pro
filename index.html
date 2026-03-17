@@ -1392,16 +1392,16 @@ Provide JSON with comprehensive predictions:
                 <div className="min-h-screen gradient-bg">
                     {/* Header */}
                     <header className="bg-gradient-to-b from-slate-900 to-slate-800/90 backdrop-blur-md border-b border-slate-700/50 sticky top-0 z-50 shadow-lg">
-                        <div className="max-w-full mx-auto px-6 py-4 flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-gradient-to-br from-green-500 via-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center glow shadow-lg">
-                                    <i className="fas fa-bolt text-2xl text-white"></i>
+                        <div className="max-w-full mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-2 md:gap-4">
+                                <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-green-500 via-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center glow shadow-lg">
+                                    <i className="fas fa-bolt text-xl md:text-2xl text-white"></i>
                                 </div>
                                 <div>
-                                    <h1 className="text-3xl font-bold bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 bg-clip-text text-transparent">
+                                    <h1 className="text-xl md:text-3xl font-bold bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 bg-clip-text text-transparent">
                                         SureBet Pro
                                     </h1>
-                                    <p className="text-xs text-slate-400">AI-Powered Football Predictions</p>
+                                    <p className="text-xs text-slate-400 hidden sm:block">AI-Powered Football Predictions</p>
                                 </div>
                             </div>
                             
@@ -1430,8 +1430,8 @@ Provide JSON with comprehensive predictions:
                         </div>
                         {/* Stats Bar */}
                         <div className="border-t border-slate-700/50 bg-slate-900/50 backdrop-blur-sm">
-                            <div className="max-w-full mx-auto px-6 py-4 flex items-center justify-between flex-wrap gap-4">
-                                <div className="flex items-center gap-6 text-sm flex-wrap">
+                            <div className="max-w-full mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center justify-between flex-wrap gap-2 md:gap-4">
+                                <div className="flex items-center gap-3 md:gap-6 text-xs md:text-sm flex-wrap">
                                     <div className="flex items-center gap-2">
                                         <i className="fas fa-trophy text-yellow-400 text-lg"></i>
                                         <span className="text-slate-400">Sure Bets:</span>
@@ -1504,16 +1504,16 @@ Provide JSON with comprehensive predictions:
                         </div>
                         {/* Filters */}
                         {matches.length > 0 && (
-                            <div className="border-t border-slate-700/50 bg-slate-900/30 px-6 py-4">
-                                <div className="flex items-center gap-4 flex-wrap">
+                            <div className="border-t border-slate-700/50 bg-slate-900/30 px-3 md:px-6 py-4">
+                                <div className="flex items-center gap-2 md:gap-4 flex-wrap">
                                     <div className="flex items-center gap-2">
                                         <i className="fas fa-filter text-slate-400"></i>
                                         <input 
                                             type="text"
-                                            placeholder="Search teams or leagues..."
+                                            placeholder="Search teams..."
                                             value={filters.search}
                                             onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-                                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 w-48 transition-all"
+                                            className="bg-slate-800 border border-slate-700 rounded-lg px-2 md:px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 w-32 md:w-48 transition-all"
                                         />
                                     </div>
                                     
@@ -1576,7 +1576,7 @@ Provide JSON with comprehensive predictions:
                     </header>
                     
                     {/* Main Content */}
-                    <main className="max-w-full mx-auto px-4 py-6">
+                    <main className="max-w-full mx-auto px-2 md:px-4 py-4 md:py-6">
                         {!config.apiKeys.footballData ? (
                             <div className="flex flex-col items-center justify-center py-20">
                                 <div className="w-24 h-24 bg-gradient-to-br from-red-500 to-orange-600 rounded-full flex items-center justify-center mb-6">
@@ -2162,19 +2162,19 @@ Provide JSON with comprehensive predictions:
                     
                     {/* Settings Modal */}
                     {showSettings && (
-                        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-2 md:p-4">
                             <div className="bg-gradient-to-b from-slate-900 to-slate-800 rounded-2xl border border-slate-700/50 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-                                <div className="p-8 border-b border-slate-700/50 flex items-center justify-between sticky top-0 bg-gradient-to-r from-slate-900 to-slate-800">
+                                <div className="p-4 md:p-8 border-b border-slate-700/50 flex items-center justify-between sticky top-0 bg-gradient-to-r from-slate-900 to-slate-800">
                                     <div>
-                                        <h2 className="text-3xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">API Configuration</h2>
-                                        <p className="text-sm text-slate-400 mt-1">Set up your sports data and AI prediction providers</p>
+                                        <h2 className="text-xl md:text-3xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">API Configuration</h2>
+                                        <p className="text-xs md:text-sm text-slate-400 mt-1 hidden md:block">Set up your sports data and AI prediction providers</p>
                                     </div>
-                                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white transition-colors p-3 hover:bg-slate-700 rounded-lg">
-                                        <i className="fas fa-times text-xl"></i>
+                                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white transition-colors p-2 md:p-3 hover:bg-slate-700 rounded-lg">
+                                        <i className="fas fa-times text-lg md:text-xl"></i>
                                     </button>
                                 </div>
                                 
-                                <div className="p-8 space-y-8">
+                                <div className="p-4 md:p-8 space-y-6 md:space-y-8">
                                     {/* Football Data API Key */}
                                     <div className="space-y-3">
                                         <h3 className="font-bold text-lg flex items-center gap-3 text-white">
@@ -2202,7 +2202,7 @@ Provide JSON with comprehensive predictions:
                                             <i className="fas fa-robot text-purple-400 text-xl"></i>
                                             Select AI Provider
                                         </h3>
-                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        <div className="grid grid-cols-2 gap-2 md:gap-3">
                                             {AI_PROVIDERS.map(provider => (
                                                 <button
                                                     key={provider.id}
