@@ -7,3 +7,20 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # API Keys - Set these in Render Dashboard for security
+      # Get free Football Data API key at: https://www.football-data.org/
+      - key: FOOTBALL_DATA_API_KEY
+        sync: false
+      # AI Provider API Keys (at least one recommended)
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: HUGGINGFACE_API_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_AI_API_KEY
+        sync: false

@@ -160,21 +160,41 @@
         // ============================================
         // CONFIGURATION & API KEYS
         // ============================================
-        
+
+        // Load environment variables (client-side)
+        const loadEnvVars = () => {
+            // Try to get env vars from window object (injected by server)
+            const env = window.ENV_VARS || {};
+
+            return {
+                FOOTBALL_DATA_API_KEY: env.FOOTBALL_DATA_API_KEY || '',
+                GROQ_API_KEY: env.GROQ_API_KEY || '',
+                OPENAI_API_KEY: env.OPENAI_API_KEY || '',
+                ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY || '',
+                GOOGLE_API_KEY: env.GOOGLE_API_KEY || '',
+                HUGGINGFACE_API_KEY: env.HUGGINGFACE_API_KEY || '',
+                COHERE_API_KEY: env.COHERE_API_KEY || '',
+                DEFAULT_AI_PROVIDER: env.DEFAULT_AI_PROVIDER || 'groq',
+                DAILY_TARGET: parseInt(env.DAILY_TARGET) || 100
+            };
+        };
+
+        const envVars = loadEnvVars();
+
         const DEFAULT_CONFIG = {
             apiKeys: {
-                openai: '',
-                anthropic: '',
-                google: '',
-                huggingface: '',
-                cohere: '',
-                groq: '',
-                footballData: ''
+                openai: envVars.OPENAI_API_KEY,
+                anthropic: envVars.ANTHROPIC_API_KEY,
+                google: envVars.GOOGLE_API_KEY,
+                huggingface: envVars.HUGGINGFACE_API_KEY,
+                cohere: envVars.COHERE_API_KEY,
+                groq: envVars.GROQ_API_KEY,
+                footballData: envVars.FOOTBALL_DATA_API_KEY
             },
-            selectedAI: 'groq',
+            selectedAI: envVars.DEFAULT_AI_PROVIDER,
             footballApi: '',
             aggregationMethod: 'weighted',
-            dailyTarget: 100
+            dailyTarget: envVars.DAILY_TARGET
         };
         
         // Available AI Providers with Free Tiers
@@ -965,6 +985,32 @@ Provide JSON with comprehensive predictions:
         
         function App() {
             const [config, setConfig] = useState(DEFAULT_CONFIG);
+            
+            // Load config from server (environment variables)
+            useEffect(() => {
+                fetch('/api/config')
+                    .then(res => res.json())
+                    .then(serverConfig => {
+                        // Only update if server has API keys configured
+                        if (serverConfig.footballDataApiKey || serverConfig.groqApiKey) {
+                            setConfig(prev => ({
+                                ...prev,
+                                apiKeys: {
+                                    ...prev.apiKeys,
+                                    footballData: serverConfig.footballDataApiKey || '',
+                                    groq: serverConfig.groqApiKey || '',
+                                    openai: serverConfig.openaiApiKey || '',
+                                    huggingface: serverConfig.huggingfaceApiKey || '',
+                                    cohere: serverConfig.cohereApiKey || '',
+                                    anthropic: serverConfig.anthropicApiKey || '',
+                                    google: serverConfig.googleAiApiKey || ''
+                                }
+                            }));
+                        }
+                    })
+                    .catch(err => console.log('Could not load server config:', err));
+            }, []);
+            
             const [matches, setMatches] = useState([]);
             const [filteredMatches, setFilteredMatches] = useState([]);
             const [loading, setLoading] = useState(false);
