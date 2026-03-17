@@ -1,0 +1,51 @@
+==============================================
+RENDER DEPLOYMENT NOTES & ENVIRONMENT VARIABLES
+==============================================
+
+⚠️ Build failed because Render is trying to deploy this repo as a *Static Site* and is looking for a publish directory called "root".
+
+✅ This project is a **Node.js Web Service** (Express server) and should be deployed as a **Web Service**, not a Static Site.
+
+### ✅ Render Service Setup (Web Service)
+1. In Render Dashboard, create a **New Web Service** (not Static Site).
+2. Connect your GitHub repo and select this project.
+3. Set these values:
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start`
+
+> If you already created a Static Site, remove it and create a Web Service instead.
+
+---
+
+### 🔐 Environment Variables (in Render Dashboard)
+Go to: https://dashboard.render.com/ → Your Service → Environment
+
+Add these secrets:
+
+----------------------------------------------
+REQUIRED:
+----------------------------------------------
+FOOTBALL_DATA_API_KEY = ___________________
+(Get free key at: https://www.football-data.org/)
+
+----------------------------------------------
+OPTIONAL (At least one recommended):
+----------------------------------------------
+GROQ_API_KEY = ___________________
+OPENAI_API_KEY = ___________________
+HUGGINGFACE_API_KEY = ___________________
+COHERE_API_KEY = ___________________
+ANTHROPIC_API_KEY = ___________________
+GOOGLE_AI_API_KEY = ___________________
+
+----------------------------------------------
+OPTIONAL CONFIGURATION:
+----------------------------------------------
+DEFAULT_AI_PROVIDER = groq
+DAILY_TARGET = 100
+
+==============================================
+AFTER ADDING:
+1. Click "Save Changes"
+2. Redeploy your service
+==============================================

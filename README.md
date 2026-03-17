@@ -43,14 +43,53 @@ cd surebet-pro
 # Install dependencies
 npm install
 
+# Test environment configuration
+npm run test-env
+
 # Start development server
 npm run dev
 ```
 
 ### API Configuration
-1. Sign up for API keys from the required providers
-2. Configure them in the settings modal within the app
-3. Or set environment variables for production deployment
+
+#### Option 1: In-App Configuration (Development)
+1. Open the app in your browser
+2. Click the settings icon (⚙️) in the top-right corner
+3. Enter your API keys in the configuration modal
+4. Select your preferred AI provider
+
+#### Option 2: Environment Variables (Production/Render)
+For secure production deployment, use environment variables:
+
+1. **Copy the environment template**:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Fill in your API keys** in the `.env` file:
+   ```env
+   # Football Data API (from football-data.org)
+   FOOTBALL_DATA_API_KEY=your_actual_api_key_here
+
+   # AI API Keys (at least one required)
+   GROQ_API_KEY=your_groq_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   GOOGLE_API_KEY=your_google_ai_api_key_here
+   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+   COHERE_API_KEY=your_cohere_api_key_here
+
+   # Default AI Provider
+   DEFAULT_AI_PROVIDER=groq
+
+   # Daily Target for Predictions
+   DAILY_TARGET=100
+   ```
+
+3. **For Render Deployment**: Set these as environment variables in your Render dashboard:
+   - Go to your Render service → Environment
+   - Add each variable with its value
+   - The app will automatically use these secure environment variables
 
 ## 🚀 Deployment on Render
 
@@ -66,8 +105,21 @@ npm run dev
    - **Publish Directory**: `.` (root directory)
    - **Node Version**: 18 or later
 
-3. **Environment Variables** (Optional):
-   - Add any API keys as environment variables for server-side configuration
+3. **Environment Variables** (Required for API functionality):
+   - Go to your Render service → Environment
+   - Add the following environment variables:
+     ```
+     FOOTBALL_DATA_API_KEY=your_football_data_api_key
+     GROQ_API_KEY=your_groq_api_key
+     OPENAI_API_KEY=your_openai_api_key
+     ANTHROPIC_API_KEY=your_anthropic_api_key
+     GOOGLE_API_KEY=your_google_ai_api_key
+     HUGGINGFACE_API_KEY=your_huggingface_api_key
+     COHERE_API_KEY=your_cohere_api_key
+     DEFAULT_AI_PROVIDER=groq
+     DAILY_TARGET=100
+     ```
+   - **Important**: At least one AI API key is required for predictions to work
 
 4. **Deploy**:
    - Click "Create Static Site"

@@ -7,7 +7,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "serve": "serve -s . -l 3000",
-    "build": "echo 'No build step required for static site'"
+    "build": "echo 'No build step required for static site'",
+    "test-env": "node test-env.js"
   },
   "keywords": [
     "sports",
