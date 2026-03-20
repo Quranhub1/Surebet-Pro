@@ -232,7 +232,7 @@
                 description: 'Fast LLM inference - Free tier',
                 icon: 'fa-bolt',
                 color: 'text-yellow-400',
-                model: 'llama-3.1-70b-versatile'
+                model: 'llama-3.1-8b-instant'
             },
             {
                 id: 'openai',
@@ -663,7 +663,7 @@ Provide JSON with comprehensive predictions:
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        model: 'llama-3.1-70b-versatile',
+                        model: 'llama-3.1-8b-instant',
                         messages: [
                             { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
                             { role: 'user', content: prompt }
