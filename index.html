@@ -655,6 +655,7 @@ Provide JSON with comprehensive predictions:
             
             // Groq API
             callGroq: async (apiKey, prompt) => {
+                console.log('🔑 Groq API Key (first 10 chars):', apiKey ? apiKey.substring(0, 10) + '...' : 'EMPTY');
                 const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -672,7 +673,11 @@ Provide JSON with comprehensive predictions:
                     })
                 });
                 
-                if (!response.ok) throw new Error('Groq API error');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Groq API Error Response:', errorText);
+                    throw new Error(`Groq API error: ${errorText}`);
+                }
                 const data = await response.json();
                 const result = AIPredictionEngine.parseResponse(data.choices[0].message.content);
                 if (result) return result;
@@ -995,7 +1000,9 @@ Respond with ONLY valid JSON:
                     .then(res => res.json())
                     .then(serverConfig => {
                         // Only update if server has API keys configured
+                        console.log('📡 Server config received:', JSON.stringify(serverConfig));
                         if (serverConfig.footballDataApiKey || serverConfig.groqApiKey) {
+                            console.log('✅ API keys found - Football Data:', serverConfig.footballDataApiKey ? 'SET' : 'MISSING', '| Groq:', serverConfig.groqApiKey ? 'SET' : 'MISSING', '| OpenAI:', serverConfig.openaiApiKey ? 'SET' : 'MISSING');
                             setConfig(prev => ({
                                 ...prev,
                                 apiKeys: {
