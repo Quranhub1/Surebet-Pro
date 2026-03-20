@@ -213,6 +213,14 @@
         // Available AI Providers with Free Tiers
         const AI_PROVIDERS = [
             {
+                id: 'discussion',
+                name: 'AI Discussion',
+                description: 'Groq + Gemini debate for refined results',
+                icon: 'fa-comments',
+                color: 'text-purple-400',
+                model: 'Ensemble'
+            },
+            {
                 id: 'groq',
                 name: 'Groq',
                 description: 'Fast LLM inference - Free tier',
@@ -227,30 +235,6 @@
                 icon: 'fa-brain',
                 color: 'text-green-400',
                 model: 'gpt-3.5-turbo'
-            },
-            {
-                id: 'huggingface',
-                name: 'HuggingFace',
-                description: 'Free inference API - No card needed',
-                icon: 'fa-robot',
-                color: 'text-orange-400',
-                model: 'meta-llama/Llama-3.1-8B-Instruct'
-            },
-            {
-                id: 'cohere',
-                name: 'Cohere',
-                description: 'Free: 5M tokens/month',
-                icon: 'fa-microchip',
-                color: 'text-blue-400',
-                model: 'command-r'
-            },
-            {
-                id: 'anthropic',
-                name: 'Anthropic',
-                description: 'Claude - $5 free credit',
-                icon: 'fa-comment',
-                color: 'text-red-400',
-                model: 'claude-3-haiku-20240307'
             },
             {
                 id: 'google',
@@ -425,21 +409,21 @@
             },
             
             // Call specific AI provider
-            callProvider: async (provider, apiKey, matchData) => {
+            callProvider: async (provider, apiKey, matchData, allConfig) => {
                 const prompt = AIPredictionEngine.buildPrompt(matchData);
                 
                 try {
                     switch(provider) {
+                        case 'discussion':
+                            // Discussion mode: Groq and Gemini debate
+                            return await AIPredictionEngine.getDiscussionPrediction({
+                                matchData,
+                                apiKeys: allConfig.apiKeys
+                            });
                         case 'groq':
                             return await AIPredictionEngine.callGroq(apiKey, prompt);
                         case 'openai':
                             return await AIPredictionEngine.callOpenAI(apiKey, prompt);
-                        case 'huggingface':
-                            return await AIPredictionEngine.callHuggingFace(apiKey, prompt);
-                        case 'cohere':
-                            return await AIPredictionEngine.callCohere(apiKey, prompt);
-                        case 'anthropic':
-                            return await AIPredictionEngine.callAnthropic(apiKey, prompt);
                         case 'google':
                             return await AIPredictionEngine.callGoogle(apiKey, prompt);
                         default:
@@ -822,6 +806,76 @@ Provide JSON with comprehensive predictions:
                 const result = AIPredictionEngine.parseResponse(data.candidates[0].content.parts[0].text);
                 if (result) return result;
                 throw new Error('Invalid response');
+            },
+            
+            // Discussion Mode: Groq and Gemini debate and produce refined prediction
+            getDiscussionPrediction: async (config) => {
+                const matchData = config.matchData;
+                const groqKey = config.apiKeys.groq;
+                const googleKey = config.apiKeys.google;
+                
+                if (!groqKey || !googleKey) {
+                    // Fall back to ensemble if keys missing
+                    return AIPredictionEngine.getPrediction(config);
+                }
+                
+                // Step 1: Get initial prediction from Groq
+                const groqPrompt = AIPredictionEngine.buildPrompt(matchData);
+                let groqPrediction;
+                try {
+                    groqPrediction = await AIPredictionEngine.callGroq(groqKey, groqPrompt);
+                } catch (e) {
+                    console.error('Groq prediction failed:', e);
+                    return AIPredictionEngine.getPrediction(config);
+                }
+                
+                // Step 2: Have Gemini review and critique Groq's prediction
+                const critiquePrompt = `You are a football analyst reviewing another AI's prediction. 
+
+Match: ${matchData.homeTeam} vs ${matchData.awayTeam}
+
+The first AI predicted:
+- Home Win: ${groqPrediction.homeWin}%
+- Draw: ${groqPrediction.draw}%
+- Away Win: ${groqPrediction.awayWin}%
+- Confidence: ${groqPrediction.confidence}%
+- Score: ${groqPrediction.predictedScore}
+- Reasoning: ${groqPrediction.reasoning}
+
+Review this prediction critically and provide your own analysis. Then produce a REFINED prediction based on your review.
+
+Respond with ONLY valid JSON:
+{
+  "homeWin": number,
+  "draw": number,
+  "awayWin": number,
+  "confidence": number,
+  "predictedScore": "X-Y",
+  "reasoning": "brief explanation",
+  "refinement": "how you improved upon the original prediction"
+}`;
+                
+                let refinedPrediction;
+                try {
+                    refinedPrediction = await AIPredictionEngine.callGoogle(googleKey, critiquePrompt);
+                } catch (e) {
+                    console.error('Gemini refinement failed:', e);
+                    return groqPrediction; // Return Groq's prediction if refinement fails
+                }
+                
+                // Step 3: Blend the predictions for final result
+                const blendedPrediction = {
+                    homeWin: Math.round((groqPrediction.homeWin * 0.4 + refinedPrediction.homeWin * 0.6)),
+                    draw: Math.round((groqPrediction.draw * 0.4 + refinedPrediction.draw * 0.6)),
+                    awayWin: Math.round((groqPrediction.awayWin * 0.4 + refinedPrediction.awayWin * 0.6)),
+                    confidence: Math.min(95, Math.round((groqPrediction.confidence + refinedPrediction.confidence) / 2 + 5)), // Boost for consensus
+                    predictedScore: refinedPrediction.predictedScore || groqPrediction.predictedScore,
+                    reasoning: `[Discussion Mode] Groq: ${groqPrediction.reasoning.slice(0, 50)}... | Gemini Refinement: ${refinedPrediction.refinement || refinedPrediction.reasoning}`,
+                    discussion: true,
+                    modelsUsed: ['groq', 'gemini']
+                };
+                
+                return blendedPrediction;
             },
             
             // Local prediction calculation (fallback)
