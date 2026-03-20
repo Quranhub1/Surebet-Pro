@@ -301,55 +301,9 @@
         // ============================================
         
         const AIPredictionEngine = {
-            // Get ensemble prediction using MULTIPLE AI models for higher accuracy
+            // Always use AI Discussion mode for best predictions
             getPrediction: async (config) => {
-                const matchData = config.matchData;
-                
-                // Define models to use (will call all available ones in parallel)
-                const modelsToTry = [
-                    { id: 'groq', key: config.apiKeys.groq },
-                    { id: 'openai', key: config.apiKeys.openai },
-                    { id: 'huggingface', key: config.apiKeys.huggingface },
-                    { id: 'cohere', key: config.apiKeys.cohere },
-                    { id: 'anthropic', key: config.apiKeys.anthropic },
-                    { id: 'google', key: config.apiKeys.google }
-                ].filter(m => m.key && m.key.length >= 5);
-                
-                // If no models configured, use local calculation
-                if (modelsToTry.length === 0) {
-                    const result = AIPredictionEngine.calculateLocalPrediction(matchData);
-                    return { ...result, ensembleModels: ['local'], modelCount: 1 };
-                }
-                
-                // Call all available models in parallel for ensemble prediction
-                const predictions = await Promise.allSettled(
-                    modelsToTry.map(model => 
-                        AIPredictionEngine.callProvider(model.id, model.key, matchData)
-                    )
-                );
-                
-                // Filter successful predictions
-                const successfulPredictions = predictions
-                    .map((p, idx) => p.status === 'fulfilled' ? p.value : null)
-                    .filter(p => p !== null);
-                
-                const modelsUsed = modelsToTry
-                    .map((m, idx) => predictions[idx].status === 'fulfilled' ? m.id : null)
-                    .filter(m => m !== null);
-                
-                // If we got at least one prediction, ensemble them
-                if (successfulPredictions.length > 0) {
-                    const ensembledResult = AIPredictionEngine.ensemblePredictions(
-                        successfulPredictions,
-                        matchData,
-                        modelsUsed
-                    );
-                    return ensembledResult;
-                }
-                
-                // Fallback to local calculation if all AI models fail
-                const result = AIPredictionEngine.calculateLocalPrediction(matchData);
-                return { ...result, ensembleModels: ['local'], modelCount: 1 };
+                return await AIPredictionEngine.getDiscussionPrediction(config);
             },
             
             // Ensemble multiple predictions for better accuracy
@@ -815,8 +769,8 @@ Provide JSON with comprehensive predictions:
                 const googleKey = config.apiKeys.google;
                 
                 if (!groqKey || !googleKey) {
-                    // Fall back to ensemble if keys missing
-                    return AIPredictionEngine.getPrediction(config);
+                    // Fall back to local calculation if keys missing
+                    return AIPredictionEngine.calculateLocalPrediction(matchData);
                 }
                 
                 // Step 1: Get initial prediction from Groq
@@ -826,7 +780,7 @@ Provide JSON with comprehensive predictions:
                     groqPrediction = await AIPredictionEngine.callGroq(groqKey, groqPrompt);
                 } catch (e) {
                     console.error('Groq prediction failed:', e);
-                    return AIPredictionEngine.getPrediction(config);
+                    return AIPredictionEngine.calculateLocalPrediction(matchData);
                 }
                 
                 // Step 2: Have Gemini review and critique Groq's prediction
