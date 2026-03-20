@@ -5,6 +5,28 @@ const fs = require('fs');
 const https = require('https');
 const app = express();
 
+// Performance: Add response caching
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+const apiCache = new Map();
+
+const getCachedData = (key) => {
+    const cached = apiCache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        console.log('📦 Cache hit for:', key);
+        return cached.data;
+    }
+    return null;
+};
+
+const setCachedData = (key, data) => {
+    apiCache.set(key, { data, timestamp: Date.now() });
+    // Limit cache size
+    if (apiCache.size > 100) {
+        const oldest = apiCache.keys().next().value;
+        apiCache.delete(oldest);
+    }
+};
+
 // Enable CORS for all routes
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -44,7 +66,16 @@ app.get('/health', (req, res) => {
 });
 
 // Proxy endpoint for Football-Data.org (avoids CORS issues and keeps API key secret)
+// Now with caching for better performance!
 app.get('/api/football-data/matches', async (req, res) => {
+  const cacheKey = `matches_${req.query.dateFrom || 'today'}_${req.query.dateTo || 'today'}`;
+  
+  // Check cache first
+  const cachedData = getCachedData(cacheKey);
+  if (cachedData) {
+    return res.json(cachedData);
+  }
+  
   console.log('Proxy request received:', req.query);
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
   console.log('API Key available:', apiKey ? 'YES (length: ' + apiKey.length + ')' : 'NO');
