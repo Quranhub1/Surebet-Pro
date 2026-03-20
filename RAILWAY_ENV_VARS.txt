@@ -1,0 +1,49 @@
+# Environment Variables for Railway Deployment
+# Add these in your Railway Dashboard → Project → Variables
+
+# ===================
+# REQUIRED
+# ===================
+
+# Football Data API - Get free key at https://www.football-data.org/
+FOOTBALL_DATA_API_KEY=your_football_data_api_key_here
+
+# ===================
+# AI PROVIDERS (At least one recommended)
+# ===================
+
+# Groq - Ultra fast (Ultra-low latency)
+# Get key at: https://console.groq.com/keys
+GROQ_API_KEY=your_groq_api_key_here
+
+# OpenRouter - Access to 100+ models
+# Get key at: https://openrouter.ai/
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# GitHub Models
+# Get key at: https://github.com/marketplace/models
+GITHUB_MODELS_API_KEY=your_github_models_api_key_here
+
+# Cohere - Free 5M tokens/month
+# Get key at: https://dashboard.cohere.com/
+COHERE_API_KEY=your_cohere_api_key_here
+
+# ===================
+# SETTINGS
+# ===================
+
+DEFAULT_AI_PROVIDER=groq
+DAILY_TARGET=100
+
+# ===================
+# OPTIONAL
+# ===================
+
+# OpenAI - $5 free credit
+# OPENAI_API_KEY=your_openai_api_key_here
+
+# Google AI - Gemini 2.0 Flash
+# GOOGLE_AI_API_KEY=your_google_ai_api_key_here
+
+# Anthropic - Claude
+# ANTHROPIC_API_KEY=your_anthropic_api_key_here
