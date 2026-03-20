@@ -341,6 +341,7 @@
         const AIPredictionEngine = {
             // Always use AI Discussion mode for best predictions
             getPrediction: async (config) => {
+                console.log('🤖 AI Prediction requested, provider:', config.selectedAI);
                 return await AIPredictionEngine.getDiscussionPrediction(config);
             },
             
@@ -423,6 +424,7 @@
                     }
                 } catch (error) {
                     console.log(`${provider} prediction failed:`, error.message);
+                    console.log('⚠️ Falling back to local prediction calculation');
                     return AIPredictionEngine.calculateLocalPrediction(matchData);
                 }
             },
@@ -875,9 +877,9 @@ Respond with ONLY valid JSON:
                 const homeStrength = (parseFloat(matchData.homeGoalsScored) / (parseFloat(matchData.homeGoalsScored) + parseFloat(matchData.awayGoalsScored) + 0.5));
                 const awayStrength = (parseFloat(matchData.awayGoalsScored) / (parseFloat(matchData.homeGoalsScored) + parseFloat(matchData.awayGoalsScored) + 0.5));
                 
-                // Calculate base probabilities with home advantage
-                let homeProb = 0.35 + (homeStrength * 0.35) + 0.08;
-                let awayProb = 0.25 + (awayStrength * 0.30);
+                // Calculate base probabilities - REMOVED home advantage bias
+                let homeProb = 0.33 + (homeStrength * 0.30);
+                let awayProb = 0.33 + (awayStrength * 0.30);
                 let drawProb = 1 - homeProb - awayProb;
                 
                 // Form adjustment
@@ -1758,8 +1760,11 @@ Respond with ONLY valid JSON:
                                                     // 1X2 prediction
                                                     const final1X2 = pred.homeWin > pred.awayWin ? (pred.homeWin > pred.draw ? '1' : 'X') : (pred.awayWin > pred.draw ? '2' : 'X');
                                                     
-                                                    // Double Chance prediction
-                                                    const finalDC = pred.homeWin > 50 ? '1X' : pred.awayWin > 50 ? 'X2' : '12';
+                                                    // Double Chance prediction - properly calculate which option has highest probability
+                                                    const homeDrawProb = pred.doubleChance?.homeDraw || (pred.homeWin + pred.draw);
+                                                    const awayDrawProb = pred.doubleChance?.awayDraw || (pred.awayWin + pred.draw);
+                                                    const homeAwayProb = pred.doubleChance?.homeAway || (pred.homeWin + pred.awayWin);
+                                                    const finalDC = homeDrawProb > awayDrawProb ? '1X' : (awayDrawProb > homeDrawProb ? 'X2' : '12');
                                                     
                                                     // Over/Under prediction
                                                     const goalsTotal = parseInt(pred.predictedScore.split('-')[0]) + parseInt(pred.predictedScore.split('-')[1]);
