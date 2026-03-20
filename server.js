@@ -50,7 +50,10 @@ app.get('/api/config', (req, res) => {
     huggingfaceApiKey: process.env.HUGGINGFACE_API_KEY || '',
     cohereApiKey: process.env.COHERE_API_KEY || '',
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
-    googleAiApiKey: process.env.GOOGLE_AI_API_KEY || ''
+    googleAiApiKey: process.env.GOOGLE_AI_API_KEY || '',
+    openrouterApiKey: process.env.OPENROUTER_API_KEY || '',
+    githubModelsApiKey: process.env.GITHUB_MODELS_API_KEY || '',
+    zAiApiKey: process.env.Z_AI_API_KEY || ''
   };
   res.json(config);
 });
@@ -155,6 +158,9 @@ app.get('/', (req, res) => {
       GOOGLE_API_KEY: process.env.GOOGLE_AI_API_KEY || '',
       HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY || '',
       COHERE_API_KEY: process.env.COHERE_API_KEY || '',
+      OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+      GITHUB_MODELS_API_KEY: process.env.GITHUB_MODELS_API_KEY || '',
+      Z_AI_API_KEY: process.env.Z_AI_API_KEY || '',
       DEFAULT_AI_PROVIDER: process.env.DEFAULT_AI_PROVIDER || 'groq',
       DAILY_TARGET: process.env.DAILY_TARGET || '100'
     };

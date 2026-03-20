@@ -187,6 +187,9 @@
                 GOOGLE_API_KEY: env.GOOGLE_API_KEY || '',
                 HUGGINGFACE_API_KEY: env.HUGGINGFACE_API_KEY || '',
                 COHERE_API_KEY: env.COHERE_API_KEY || '',
+                OPENROUTER_API_KEY: env.OPENROUTER_API_KEY || '',
+                GITHUB_MODELS_API_KEY: env.GITHUB_MODELS_API_KEY || '',
+                Z_AI_API_KEY: env.Z_AI_API_KEY || '',
                 DEFAULT_AI_PROVIDER: env.DEFAULT_AI_PROVIDER || 'groq',
                 DAILY_TARGET: parseInt(env.DAILY_TARGET) || 100
             };
@@ -202,6 +205,9 @@
                 huggingface: envVars.HUGGINGFACE_API_KEY,
                 cohere: envVars.COHERE_API_KEY,
                 groq: envVars.GROQ_API_KEY,
+                openrouter: envVars.OPENROUTER_API_KEY,
+                github: envVars.GITHUB_MODELS_API_KEY,
+                zai: envVars.Z_AI_API_KEY,
                 footballData: envVars.FOOTBALL_DATA_API_KEY
             },
             selectedAI: envVars.DEFAULT_AI_PROVIDER,
@@ -243,6 +249,38 @@
                 icon: 'fa-google',
                 color: 'text-blue-300',
                 model: 'gemini-2.0-flash'
+            },
+            {
+                id: 'openrouter',
+                name: 'OpenRouter',
+                description: '100+ models - Free tier available',
+                icon: 'fa-network-wired',
+                color: 'text-orange-400',
+                model: 'meta-llama/llama-3.1-70b-instruct'
+            },
+            {
+                id: 'github',
+                name: 'GitHub Models',
+                description: 'Azure-hosted models',
+                icon: 'fa-github',
+                color: 'text-white',
+                model: 'gpt-4o-mini'
+            },
+            {
+                id: 'cohere',
+                name: 'Cohere',
+                description: '5M tokens/month free',
+                icon: 'fa-code-branch',
+                color: 'text-cyan-400',
+                model: 'command-r-plus'
+            },
+            {
+                id: 'zai',
+                name: 'Z.ai',
+                description: 'AI provider',
+                icon: 'fa-robot',
+                color: 'text-pink-400',
+                model: 'default'
             }
         ];
         
