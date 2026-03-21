@@ -1881,11 +1881,18 @@ Return ONLY the JSON array, no other text.`;
                                 const homeForm = generateRealisticForm(match.homeTeam, match.competition?.name || match.league, true);
                                 const awayForm = generateRealisticForm(match.awayTeam, match.competition?.name || match.league, false);
                                 
-                                // Calculate probabilities from prediction
-                                const homeWin = pred.winner === 'Home' ? 55 : pred.winner === 'Draw' ? 30 : 25;
-                                const draw = pred.winner === 'Draw' ? 40 : 25;
-                                const awayWin = pred.winner === 'Away' ? 55 : pred.winner === 'Draw' ? 30 : 25;
-                                const confidence = 75;
+                                // Calculate probabilities from prediction - use local fallback if no server prediction
+                                const useLocalFallback = !pred.winner;
+                                const localPred = useLocalFallback ? AIPredictionEngine.calculateLocalPrediction({
+                                    homeTeam: match.homeTeam,
+                                    awayTeam: match.awayTeam,
+                                    league: match.competition?.name || match.league
+                                }) : null;
+                                
+                                const homeWin = useLocalFallback ? localPred.homeWin : (pred.winner === 'Home' ? 55 : pred.winner === 'Draw' ? 30 : 25);
+                                const draw = useLocalFallback ? localPred.draw : (pred.winner === 'Draw' ? 40 : 25);
+                                const awayWin = useLocalFallback ? localPred.awayWin : (pred.winner === 'Away' ? 55 : pred.winner === 'Draw' ? 30 : 25);
+                                const confidence = useLocalFallback ? localPred.confidence : 75;
                                 
                                 // Format for your UI
                                 return {
@@ -1910,8 +1917,8 @@ Return ONLY the JSON array, no other text.`;
                                         draw,
                                         awayWin,
                                         confidence,
-                                        predictedScore: pred.score || "1-1",
-                                        reasoning: pred.reason || "Analyzing..."
+                                        predictedScore: useLocalFallback ? localPred.predictedScore : (pred.score || "1-1"),
+                                        reasoning: useLocalFallback ? localPred.reasoning : (pred.reason || "Analyzing...")
                                     }, {
                                         homeTeam: match.homeTeam,
                                         awayTeam: match.awayTeam,
@@ -1919,9 +1926,9 @@ Return ONLY the JSON array, no other text.`;
                                     }),
                                     aiPrediction: {
                                         confidence: confidence,
-                                        predictedScore: pred.score || "1-1",
-                                        reasoning: pred.reason || "Analyzing...",
-                                        isValueBet: pred.isValueBet || false,
+                                        predictedScore: useLocalFallback ? localPred.predictedScore : (pred.score || "1-1"),
+                                        reasoning: useLocalFallback ? localPred.reasoning : (pred.reason || "Analyzing..."),
+                                        isValueBet: useLocalFallback ? localPred.isValueBet : (pred.isValueBet || false),
                                         homeWin: homeWin,
                                         draw: draw,
                                         awayWin: awayWin,
