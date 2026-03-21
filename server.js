@@ -1,4 +1,4 @@
-require('dotenv').config();
+const express = require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -185,8 +185,13 @@ app.get('/', (req, res) => {
 // Add new endpoint to handle the heavy AI work
 app.post('/api/predict-batch', express.json(), async (req, res) => {
     const { matches } = req.body;
-    const googleKey = process.env.GOOGLE_AI_API_KEY;
+    
+    // Check for multiple possible env var names
+    const googleKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
+
+    console.log('🔑 Server has Google Key:', !!googleKey);
+    console.log('🔑 Server has Groq Key:', !!groqKey);
 
     if (!matches || !Array.isArray(matches)) {
         return res.status(400).json({ error: "Invalid matches data" });
@@ -204,19 +209,52 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
 
     try {
         // ORCHESTRATION LOGIC:
-        // We use Gemini 1.5 Flash for the heavy lifting (10 games at once)
-        // because its free tier has much higher limits than Groq.
-        if (googleKey) {
+        // Use Gemini 1.5 Flash for the heavy lifting (10 games at once)
+        if (googleKey && GoogleGenerativeAI) {
             const genAI = new GoogleGenerativeAI(googleKey);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
             const result = await model.generateContent(prompt);
             const response = await result.response;
             const text = response.text();
-            const cleanJson = text.match(/\[.*\]/s)[0]; // Extract array
-            return res.json(JSON.parse(cleanJson));
-        } 
+            const matchArray = text.match(/\[.*\]/s);
+            if (matchArray) {
+                return res.json(JSON.parse(matchArray[0]));
+            }
+            throw new Error('Could not parse AI response');
+        } else if (groqKey) {
+            // Fallback to Groq if available
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${groqKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'llama-3.1-8b-instant',
+                    messages: [
+                        { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 1000
+                })
+            });
+            
+            if (!groqResponse.ok) {
+                const errText = await groqResponse.text();
+                throw new Error(`Groq API error: ${errText}`);
+            }
+            
+            const groqData = await groqResponse.json();
+            const groqText = groqData.choices[0].message.content;
+            const matchArray = groqText.match(/\[.*\]/s);
+            if (matchArray) {
+                return res.json(JSON.parse(matchArray[0]));
+            }
+            throw new Error('Could not parse Groq response');
+        }
         
-        throw new Error("No AI providers available on server");
+        throw new Error("No AI API keys configured on server. Please set GOOGLE_AI_API_KEY or GROQ_API_KEY");
     } catch (error) {
         console.error("Server Prediction Error:", error);
         res.status(500).json({ error: error.message });

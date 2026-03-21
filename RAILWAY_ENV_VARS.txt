@@ -9,8 +9,12 @@
 FOOTBALL_DATA_API_KEY=your_football_data_api_key_here
 
 # ===================
-# AI PROVIDERS (At least one recommended)
+# AI PROVIDERS (At least one recommended for batch predictions)
 # ===================
+
+# Google AI - Gemini 1.5 Flash (Recommended - handles 10 matches per request)
+# Get key at: https://aistudio.google.com/app/apikey
+GOOGLE_AI_API_KEY=your_google_ai_api_key_here
 
 # Groq - Ultra fast (Ultra-low latency)
 # Get key at: https://console.groq.com/keys
