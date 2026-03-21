@@ -10,15 +10,7 @@ const https = require('https');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 console.log('✅ Google Generative AI SDK loaded');
 
-// Optional: Tavily AI for match news search
-let tavily;
-try {
-    const { tavily: tavilyClient } = require('@tavily/core');
-    tavily = tavilyClient(process.env.TAVILY_API_KEY);
-    console.log('✅ Tavily AI SDK loaded');
-} catch (e) {
-    console.log('ℹ️ Tavily AI SDK not installed (optional for news)');
-}
+// Using Tavily API via direct axios calls (no SDK needed)
 
 // Function to get market sentiment (odds from bookmakers)
 async function getMarketSentiment(leagueKey, homeTeam, awayTeam) {
@@ -72,22 +64,23 @@ async function getMarketSentiment(leagueKey, homeTeam, awayTeam) {
     }
 }
 
-// Function to get match news
 async function getMatchNews(homeTeam, awayTeam) {
-    if (!tavily) {
-        return { answer: "Tavily API not configured on server" };
-    }
+    const apiKey = process.env.TAVILY_API_KEY;
+    if (!apiKey) return "News search unavailable (No API Key).";
+
     try {
-        const query = `${homeTeam} vs ${awayTeam} team news injuries lineups today`;
-        const searchResult = await tavily.search(query, {
-            searchDepth: "basic",
-            maxResults: 3,
-            includeAnswer: true
+        const response = await axios.post('https://api.tavily.com/search', {
+            api_key: apiKey,
+            query: `${homeTeam} vs ${awayTeam} team news injuries lineups today`,
+            search_depth: "basic",
+            max_results: 3,
+            include_answer: true
         });
-        return searchResult;
+
+        return response.data.answer || "No specific team news found for today.";
     } catch (e) {
-        console.error("Tavily Search Error:", e);
-        return { answer: "News search unavailable." };
+        console.error("Tavily API Error:", e.response?.data || e.message);
+        return "Latest news could not be retrieved.";
     }
 }
 
@@ -300,7 +293,7 @@ app.post('/api/match-news', express.json(), async (req, res) => {
     
     try {
         const news = await getMatchNews(homeTeam, awayTeam);
-        res.json(news);
+        res.json({ answer: news });
     } catch (error) {
         console.error("Match News Error:", error);
         res.status(500).json({ error: error.message });
@@ -348,7 +341,7 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             console.log(`📰 Getting news for: ${match.homeTeam} vs ${match.awayTeam}`);
             try {
                 const newsResult = await getMatchNews(match.homeTeam, match.awayTeam);
-                liveNews = newsResult.answer || "No recent news available";
+                liveNews = newsResult || "No recent news available";
             } catch (newsErr) {
                 console.log(`⚠️ Could not get news for ${match.homeTeam} vs ${match.awayTeam}:`, newsErr.message);
             }
