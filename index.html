@@ -1839,7 +1839,7 @@ Return ONLY the JSON array, no other text.`;
                             const predictions = data;
 
                             // 3. Merge predictions into your match objects
-                            const processedChunk = chunk.map(match => {
+                            const processedChunk = chunk.map((match, matchIndex) => {
                                 const pred = predictions.find(p => p.id === match.id) || {};
                                 
                                 // Generate realistic form data
@@ -1890,7 +1890,7 @@ Return ONLY the JSON array, no other text.`;
                                 // Format for your UI
                                 return {
                                     id: match.id,
-                                    index: allProcessed.length + processedChunk.indexOf(match) + 1,
+                                    index: allProcessed.length + matchIndex + 1,
                                     league: match.competition.name,
                                     leagueLogo: match.competition?.emblem,
                                     homeTeam: match.homeTeam,
@@ -1982,7 +1982,7 @@ Return ONLY the JSON array, no other text.`;
                         } catch (err) {
                             console.error("Batch failed, using local fallback", err);
                             // Fallback to local math so the app doesn't crash
-                            const fallbackChunk = chunk.map(match => {
+                            const fallbackChunk = chunk.map((match, matchIndex) => {
                                 const localPred = AIPredictionEngine.calculateLocalPrediction({
                                     homeTeam: match.homeTeam,
                                     awayTeam: match.awayTeam,
@@ -1990,7 +1990,7 @@ Return ONLY the JSON array, no other text.`;
                                 });
                                 return {
                                     id: match.id,
-                                    index: allProcessed.length + chunk.indexOf(match) + 1,
+                                    index: allProcessed.length + matchIndex + 1,
                                     league: match.competition?.name || match.league,
                                     leagueLogo: match.competition?.emblem,
                                     homeTeam: match.homeTeam,
