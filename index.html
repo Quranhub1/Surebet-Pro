@@ -1845,11 +1845,11 @@ Return ONLY the JSON array, no other text.`;
                                 const a = parts[1];
 
                                 if (h > a) { // Home Win
-                                    return { homeWin: 70, draw: 20, awayWin: 10, dc: '1X' };
+                                    return { homeWin: 45, draw: 30, awayWin: 25, dc: '1X' };
                                 } else if (a > h) { // Away Win
-                                    return { homeWin: 10, draw: 20, awayWin: 70, dc: 'X2' };
+                                    return { homeWin: 25, draw: 30, awayWin: 45, dc: 'X2' };
                                 } else { // Draw
-                                    return { homeWin: 25, draw: 50, awayWin: 25, dc: '1X' };
+                                    return { homeWin: 30, draw: 40, awayWin: 30, dc: '1X' };
                                 }
                             };
 
