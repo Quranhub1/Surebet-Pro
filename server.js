@@ -229,7 +229,7 @@ app.post('/api/match-news', express.json(), async (req, res) => {
     }
 });
 
-// Add new endpoint to handle the heavy AI work
+// Add new endpoint to handle the heavy AI work with live news
 app.post('/api/predict-batch', express.json(), async (req, res) => {
     const { matches } = req.body;
     
@@ -244,68 +244,113 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
         return res.status(400).json({ error: "Invalid matches data" });
     }
 
-    console.log(`🤖 Processing batch of ${matches.length} matches via Server Orchestrator`);
+    console.log(`🤖 Processing batch of ${matches.length} matches via Server Orchestrator with live news`);
 
-    const prompt = `Analyze these football matches. For each match, provide:
-    1. Winner (Home/Away/Draw)
-    2. Correct Score
-    3. One tactical reason for this result.
-    Matches: ${JSON.stringify(matches.map(m => ({id: m.id, h: m.homeTeam, a: m.awayTeam})))}
-    
-    Return ONLY a JSON array of objects: [{"id": 1, "winner": "...", "score": "...", "reason": "..."}]`;
+    const processedPredictions = [];
 
-    try {
-        // ORCHESTRATION LOGIC:
-        // Use Gemini 1.5 Flash for the heavy lifting (10 games at once)
-        if (googleKey && GoogleGenerativeAI) {
-            const genAI = new GoogleGenerativeAI(googleKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
-            const matchArray = text.match(/\[.*\]/s);
-            if (matchArray) {
-                return res.json(JSON.parse(matchArray[0]));
+    // Process each match individually with news search
+    for (const match of matches) {
+        try {
+            // 1. CALL THE SEARCH AGENT (The "Researcher")
+            console.log(`📰 Getting news for: ${match.homeTeam} vs ${match.awayTeam}`);
+            let liveNews = "No recent news available";
+            try {
+                const newsResult = await getMatchNews(match.homeTeam, match.awayTeam);
+                liveNews = newsResult.answer || "No recent news available";
+            } catch (newsErr) {
+                console.log(`⚠️ Could not get news for ${match.homeTeam} vs ${match.awayTeam}:`, newsErr.message);
             }
-            throw new Error('Could not parse AI response');
-        } else if (groqKey) {
-            // Fallback to Groq if available
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${groqKey}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: 'llama-3.1-8b-instant',
-                    messages: [
-                        { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
-                        { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.3,
-                    max_tokens: 1000
-                })
+
+            // 2. CONSTRUCT THE ENHANCED PROMPT
+            const prompt = `
+            MATCH: ${match.homeTeam} vs ${match.awayTeam}
+            LEAGUE: ${match.competition?.name || 'Unknown League'}
+            LATEST NEWS: ${liveNews}
+            
+            INSTRUCTIONS:
+            As a Pro Scout, analyze the match. 
+            IMPORTANT: If the news mentions a star player is injured (e.g., "De Bruyne out"), adjust your prediction score accordingly.
+            
+            Provide:
+            1. Winner (Home/Away/Draw)
+            2. Correct Score (e.g., "2-1")
+            3. A detailed tactical reason based on the news provided
+            
+            Return ONLY valid JSON: {"id": "${match.id}", "winner": "...", "score": "X-Y", "reason": "..."}`;
+
+            // 3. CALL GEMINI/GROQ
+            let prediction = null;
+            
+            if (googleKey && GoogleGenerativeAI) {
+                const genAI = new GoogleGenerativeAI(googleKey);
+                const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const text = response.text();
+                
+                // Try to extract JSON from response
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    prediction = JSON.parse(jsonMatch[0]);
+                    prediction.id = match.id; // Ensure ID is set
+                }
+            } else if (groqKey) {
+                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${groqKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'llama-3.1-8b-instant',
+                        messages: [
+                            { role: 'system', content: 'You are a football prediction expert. Always respond with valid JSON only.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 500
+                    })
+                });
+                
+                if (groqResponse.ok) {
+                    const groqData = await groqResponse.json();
+                    const groqText = groqData.choices[0].message.content;
+                    const jsonMatch = groqText.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        prediction = JSON.parse(jsonMatch[0]);
+                        prediction.id = match.id;
+                    }
+                }
+            }
+
+            if (prediction) {
+                processedPredictions.push(prediction);
+                console.log(`✅ Predicted: ${match.homeTeam} vs ${match.awayTeam} → ${prediction.score}`);
+            } else {
+                // Fallback to local prediction
+                processedPredictions.push({
+                    id: match.id,
+                    winner: 'Draw',
+                    score: '1-1',
+                    reason: 'AI prediction failed, using default'
+                });
+            }
+
+            // Small delay between matches to avoid rate limits
+            await new Promise(r => setTimeout(r, 1000));
+            
+        } catch (matchErr) {
+            console.error(`❌ Error processing ${match.homeTeam} vs ${match.awayTeam}:`, matchErr.message);
+            processedPredictions.push({
+                id: match.id,
+                winner: 'Draw',
+                score: '1-1',
+                reason: 'Error: ' + matchErr.message
             });
-            
-            if (!groqResponse.ok) {
-                const errText = await groqResponse.text();
-                throw new Error(`Groq API error: ${errText}`);
-            }
-            
-            const groqData = await groqResponse.json();
-            const groqText = groqData.choices[0].message.content;
-            const matchArray = groqText.match(/\[.*\]/s);
-            if (matchArray) {
-                return res.json(JSON.parse(matchArray[0]));
-            }
-            throw new Error('Could not parse Groq response');
         }
-        
-        throw new Error("No AI API keys configured on server. Please set GOOGLE_AI_API_KEY or GROQ_API_KEY");
-    } catch (error) {
-        console.error("Server Prediction Error:", error);
-        res.status(500).json({ error: error.message });
     }
+
+    res.json(processedPredictions);
 });
 
 // Fallback to index.html for SPA routing
