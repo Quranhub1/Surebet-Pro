@@ -14,6 +14,35 @@ try {
     console.log('ℹ️ Google Generative AI SDK not installed (optional for standalone service)');
 }
 
+// Optional: Tavily AI for match news search
+let tavily;
+try {
+    const { tavily: tavilyClient } = require('@tavily/core');
+    tavily = tavilyClient(process.env.TAVILY_API_KEY);
+    console.log('✅ Tavily AI SDK loaded');
+} catch (e) {
+    console.log('ℹ️ Tavily AI SDK not installed (optional for news)');
+}
+
+// Function to get match news
+async function getMatchNews(homeTeam, awayTeam) {
+    if (!tavily) {
+        return { answer: "Tavily API not configured on server" };
+    }
+    try {
+        const query = `${homeTeam} vs ${awayTeam} team news injuries lineups today`;
+        const searchResult = await tavily.search(query, {
+            searchDepth: "basic",
+            maxResults: 3,
+            includeAnswer: true
+        });
+        return searchResult;
+    } catch (e) {
+        console.error("Tavily Search Error:", e);
+        return { answer: "News search unavailable." };
+    }
+}
+
 const app = express();
 
 // Performance: Add response caching
@@ -181,6 +210,23 @@ app.get('/', (req, res) => {
 
     res.send(modifiedHtml);
   });
+});
+
+// Endpoint to get match news using Tavily AI
+app.post('/api/match-news', express.json(), async (req, res) => {
+    const { homeTeam, awayTeam } = req.body;
+    
+    if (!homeTeam || !awayTeam) {
+        return res.status(400).json({ error: "Missing homeTeam or awayTeam" });
+    }
+    
+    try {
+        const news = await getMatchNews(homeTeam, awayTeam);
+        res.json(news);
+    } catch (error) {
+        console.error("Match News Error:", error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Add new endpoint to handle the heavy AI work
