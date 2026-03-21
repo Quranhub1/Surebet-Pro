@@ -245,10 +245,10 @@
             {
                 id: 'google',
                 name: 'Google AI',
-                description: 'Gemini 2.0 Flash - Free tier',
+                description: 'Gemini 1.5 Flash - Fast & Free',
                 icon: 'fa-google',
                 color: 'text-blue-300',
-                model: 'gemini-2.0-flash'
+                model: 'gemini-1.5-flash'
             },
             {
                 id: 'openrouter',
@@ -1005,28 +1005,92 @@ Provide JSON with comprehensive predictions:
                 throw new Error('Invalid response');
             },
             
-            // Google AI (Gemini 2.0 Flash - Free)
+            // Google AI (Gemini 1.5 Flash - Free, Fast, Reliable)
             callGoogle: async (apiKey, prompt) => {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [{
-                                text: 'You are a football prediction expert. Always respond with valid JSON only. ' + prompt
-                            }]
-                        }],
-                        generationConfig: { temperature: 0.3, maxOutputTokens: 500 }
-                    })
-                });
+                console.log('🔑 Gemini API Key (first 10 chars):', apiKey ? apiKey.substring(0, 10) + '...' : 'EMPTY');
                 
-                if (!response.ok) throw new Error('Google API error');
-                const data = await response.json();
+                let response;
+                try {
+                    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [{
+                                    text: `You are an expert football analyst with 20 years of experience using Poisson distribution and statistical models. Always respond with valid JSON only.\n\n${prompt}`
+                                }]
+                            }],
+                            generationConfig: { 
+                                temperature: 0.3, 
+                                maxOutputTokens: 800,
+                                topP: 0.8,
+                                topK: 40
+                            }
+                        })
+                    });
+                } catch (fetchError) {
+                    console.error('❌ Gemini API Network Error:', fetchError.message);
+                    throw new Error(`Network error: ${fetchError.message}`);
+                }
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Gemini API Error Response:', errorText);
+                    if (response.status === 429 || errorText.includes('rate_limit') || errorText.includes('Too Many Requests')) {
+                        throw new Error(`Rate limit exceeded: ${errorText}`);
+                    }
+                    throw new Error(`Gemini API error: ${errorText}`);
+                }
+                
+                let data;
+                try {
+                    data = await response.json();
+                } catch (jsonError) {
+                    console.error('❌ Failed to parse Gemini response as JSON:', jsonError.message);
+                    throw new Error('Invalid JSON response from Gemini API');
+                }
+                
+                if (!data.candidates || !data.candidates[0] || !data.candidates[0].content || !data.candidates[0].content.parts || !data.candidates[0].content.parts[0]) {
+                    console.error('❌ Unexpected Gemini response structure:', JSON.stringify(data));
+                    throw new Error('Unexpected response structure from Gemini API');
+                }
+                
                 const result = AIPredictionEngine.parseResponse(data.candidates[0].content.parts[0].text);
                 if (result) return result;
-                throw new Error('Invalid response');
+                throw new Error('Invalid response - could not parse prediction');
             },
             
+            // Batch prediction function - processes multiple matches in a single API call
+            getBatchPredictions: async (config, matches) => {
+                const { apiKeys, selectedAI } = config;
+                
+                // Construct a compact list for the AI
+                const matchContext = matches.map(m => ({
+                    id: m.id,
+                    h: m.homeTeam.name,
+                    a: m.awayTeam.name,
+                    l: m.competition.name
+                }));
+
+                const prompt = `Act as a Pro Football Scout. Analyze these ${matches.length} matches.
+                For each Match ID, provide: 
+                1. Predicted Score (e.g., "2-1")
+                2. HomeWin/Draw/AwayWin probabilities (must total 100)
+                3. One tactical reason (e.g., "Home team high press vs Away team weak fullbacks")
+                
+                Return ONLY a JSON array of objects:
+                [{"id": 123, "homeWin": 50, "draw": 20, "awayWin": 30, "score": "2-1", "reason": "..."}]
+                
+                Matches: ${JSON.stringify(matchContext)}`;
+
+                // Use Gemini for batches because it handles large prompts better
+                if (apiKeys.google) {
+                    return await AIPredictionEngine.callGoogle(apiKeys.google, prompt);
+                } else {
+                    return await AIPredictionEngine.callGroq(apiKeys.groq, prompt);
+                }
+            },
+
             // Discussion Mode: Groq and Gemini debate and produce refined prediction
             getDiscussionPrediction: async (config) => {
                 const matchData = config.matchData;
@@ -1599,331 +1663,362 @@ Respond with ONLY valid JSON:
                 }
             }, [matches, filters]);
             
+            // ============================================
+            // BATCH PREDICTION SYSTEM - More Efficient!
+            // ============================================
+            
+            // Call multiple AI agents in rotation for batch predictions
+            const callMultiAgentBatch = async (matchesSummary, agentIndex, config) => {
+                const prompt = `You are an expert football analyst. Predict outcomes for these ${matchesSummary.length} matches.
+                
+Matches:
+${matchesSummary.map((m, i) => `${i+1}. ${m.home} vs ${m.away} (${m.league})`).join('\n')}
+
+For EACH match, provide predictions in this JSON array format:
+[
+  {
+    "id": ${matchesSummary[0].id},
+    "homeWin": number (0-100),
+    "draw": number (0-100),
+    "awayWin": number (0-100),
+    "confidence": number (0-100),
+    "predictedScore": "X-Y",
+    "reasoning": "brief explanation"
+  }
+]
+
+Consider: Recent form, home advantage, team strength, league context.
+Return ONLY the JSON array, no other text.`;
+
+                // Rotate between AI providers
+                const providers = ['google', 'groq', 'openai'];
+                const provider = providers[agentIndex % providers.length];
+                const apiKey = config.apiKeys[provider];
+                
+                if (!apiKey) {
+                    throw new Error(`No API key for ${provider}`);
+                }
+
+                let response;
+                try {
+                    switch(provider) {
+                        case 'google':
+                            response = await AIPredictionEngine.callGoogle(apiKey, prompt);
+                            break;
+                        case 'groq':
+                            response = await AIPredictionEngine.callGroq(apiKey, prompt);
+                            break;
+                        case 'openai':
+                            response = await AIPredictionEngine.callOpenAI(apiKey, prompt);
+                            break;
+                        default:
+                            response = await AIPredictionEngine.callGoogle(apiKey, prompt);
+                    }
+                } catch (error) {
+                    console.error(`${provider} batch prediction failed:`, error);
+                    throw error;
+                }
+
+                // Parse batch response
+                try {
+                    const jsonMatch = response.toString().match(/\[[\s\S]*\]/);
+                    if (jsonMatch) {
+                        return JSON.parse(jsonMatch[0]);
+                    }
+                    throw new Error('Could not parse batch response');
+                } catch (e) {
+                    console.error('Failed to parse batch response:', e);
+                    throw e;
+                }
+            };
+
+            // Format prediction from batch response to match expected structure
+            const formatPrediction = (batchPrediction) => {
+                const homeWin = batchPrediction.homeWin || 33;
+                const draw = batchPrediction.draw || 33;
+                const awayWin = batchPrediction.awayWin || 34;
+                
+                return {
+                    homeWin: Math.min(90, Math.max(10, homeWin)),
+                    draw: Math.min(40, Math.max(5, draw)),
+                    awayWin: Math.min(90, Math.max(10, awayWin)),
+                    confidence: Math.min(95, Math.max(45, batchPrediction.confidence || 70)),
+                    predictedScore: batchPrediction.predictedScore || '1-1',
+                    reasoning: batchPrediction.reasoning || 'Batch AI analysis',
+                    doubleChance: {
+                        homeDraw: homeWin + draw,
+                        awayDraw: awayWin + draw,
+                        homeAway: homeWin + awayWin
+                    },
+                    overUnder: {
+                        over1_5: 70, under1_5: 30,
+                        over2_5: 55, under2_5: 45,
+                        over3_5: 30, under3_5: 70,
+                        over0_5: 95, under0_5: 5,
+                        over4_5: 15, under4_5: 85
+                    },
+                    btts: {
+                        yes: 55,
+                        no: 45
+                    },
+                    drawNoBet: {
+                        home: (homeWin / (homeWin + awayWin)) * 100,
+                        away: (awayWin / (homeWin + awayWin)) * 100
+                    },
+                    asianHandicap: {
+                        home_minus1: Math.max(0, homeWin - 15),
+                        home_minus0_5: Math.max(0, homeWin - 5),
+                        away_minus1: Math.max(0, awayWin - 15),
+                        away_minus0_5: Math.max(0, awayWin - 5),
+                        home_plus1: homeWin + draw,
+                        away_plus1: awayWin + draw
+                    },
+                    correctScore: {
+                        "1-0": 15, "2-0": 10, "2-1": 12, "3-0": 5, "3-1": 6, "3-2": 4,
+                        "0-0": 8, "1-1": 10, "2-2": 6,
+                        "0-1": 8, "0-2": 5, "1-2": 6, "0-3": 2, "1-3": 3, "2-3": 2
+                    },
+                    ensembleModels: ['batch-ai'],
+                    modelCount: 1,
+                    consensusScore: batchPrediction.confidence || 70,
+                    individualPredictions: []
+                };
+            };
+
             const loadRealMatches = async () => {
                 if (!config.apiKeys.footballData) {
-                    setApiError('Please add your Football-Data.org API key in Settings');
+                    setApiError('Please add your Football-Data.org API key');
                     return;
                 }
-                
-                // Reset the request queue to clear any pending requests from previous loads
-                RequestQueue.reset();
-                
+
                 setLoading(true);
                 setGenerationProgress(0);
                 setApiError(null);
                 
                 try {
-                    // Fetch matches from API
+                    // 1. Get the match list from your proxy
                     const rawMatches = await FOOTBALL_API.getMatches(config.apiKeys.footballData);
                     
                     if (!rawMatches || rawMatches.length === 0) {
-                        setApiError('No matches found for the next 7 days. Please try again later.');
+                        setApiError('No matches found.');
                         setLoading(false);
                         return;
                     }
-                    
-                    setGenerationProgress(30);
-                    
-                    // Get unique leagues
-                    const leagues = [...new Set(rawMatches.map(m => m.competition.name))];
-                    setAvailableLeagues(leagues);
-                    
-                    // Process each match with AI prediction
-                    const processedMatches = [];
-                    const total = rawMatches.length;
-                    
-                    for (let i = 0; i < rawMatches.length; i++) {
+
+                    const BATCH_SIZE = 10; // Process 10 games at a time
+                    let allProcessed = [];
+
+                    for (let i = 0; i < rawMatches.length; i += BATCH_SIZE) {
+                        const chunk = rawMatches.slice(i, i + BATCH_SIZE);
+                        
                         try {
-                            const match = rawMatches[i];
-                            
-                            // Generate realistic form based on team name hash and league
-                            const generateRealisticForm = (teamName, league, isHome) => {
-                                // Create a deterministic seed from team name
-                                let hash = 0;
-                                for (let j = 0; j < teamName.length; j++) {
-                                    hash = ((hash << 5) - hash) + teamName.charCodeAt(j);
-                                    hash = hash & hash;
-                                }
-                                hash = Math.abs(hash);
-                                
-                                // League strength factor (higher = stronger league)
-                                const leagueStrength = {
-                                    'Premier League': 0.9,
-                                    'La Liga': 0.88,
-                                    'Bundesliga': 0.85,
-                                    'Serie A': 0.85,
-                                    'Ligue 1': 0.82,
-                                    'Eredivisie': 0.75,
-                                    'Primeira Liga': 0.75,
-                                    'Championship': 0.70,
-                                    'Brasileirão': 0.78,
-                                    'MLS': 0.65
-                                };
-                                
-                                const strength = leagueStrength[league] || 0.70;
-                                const homeBonus = isHome ? 0.1 : 0;
-                                
-                                // Generate form based on hash (deterministic but varied)
-                                const form = [];
-                                for (let j = 0; j < 5; j++) {
-                                    const seed = (hash + j * 17 + (isHome ? 31 : 0)) % 100;
-                                    const adjustedSeed = seed / 100;
-                                    
-                                    // Probability distribution based on team strength
-                                    const winProb = (strength + homeBonus) * 0.45;
-                                    const drawProb = 0.28;
-                                    
-                                    if (adjustedSeed < winProb) {
-                                        form.push(3); // Win
-                                    } else if (adjustedSeed < winProb + drawProb) {
-                                        form.push(1); // Draw
-                                    } else {
-                                        form.push(0); // Loss
-                                    }
-                                }
-                                
-                                return form;
-                            };
-                            
-                            // Generate realistic goals stats based on team and league
-                            const generateGoalsStats = (teamName, league, isHome) => {
-                                let hash = 0;
-                                for (let j = 0; j < teamName.length; j++) {
-                                    hash = ((hash << 5) - hash) + teamName.charCodeAt(j);
-                                    hash = hash & hash;
-                                }
-                                hash = Math.abs(hash);
-                                
-                                // Base goals per game varies by league
-                                const leagueAvgGoals = {
-                                    'Premier League': 1.35,
-                                    'La Liga': 1.25,
-                                    'Bundesliga': 1.45,
-                                    'Serie A': 1.30,
-                                    'Ligue 1': 1.28,
-                                    'Eredivisie': 1.50,
-                                    'Primeira Liga': 1.20,
-                                    'Championship': 1.15,
-                                    'Brasileirão': 1.22,
-                                    'MLS': 1.35
-                                };
-                                
-                                const avgGoals = leagueAvgGoals[league] || 1.30;
-                                const homeBonus = isHome ? 0.15 : -0.05;
-                                
-                                // Generate varied stats
-                                const scoredBase = avgGoals + homeBonus;
-                                const concededBase = avgGoals - homeBonus + 0.1;
-                                
-                                // Add variance based on hash
-                                const variance = ((hash % 30) - 15) / 100;
-                                
-                                const goalsScored = Math.max(0.5, Math.min(2.5, scoredBase + variance));
-                                const goalsConceded = Math.max(0.5, Math.min(2.5, concededBase - variance * 0.5));
-                                
-                                return { goalsScored, goalsConceded };
-                            };
-                            
-                            // Extract realistic team form
-                            const homeForm = generateRealisticForm(match.homeTeam.name, match.competition.name, true);
-                            const awayForm = generateRealisticForm(match.awayTeam.name, match.competition.name, false);
-                            
-                            // Get goals stats
-                            const homeStats = generateGoalsStats(match.homeTeam.name, match.competition.name, true);
-                            const awayStats = generateGoalsStats(match.awayTeam.name, match.competition.name, false);
-                            
-                            let homeGoalsScored = homeStats.goalsScored;
-                            let awayGoalsScored = awayStats.goalsScored;
-                            
-                            // If we have data from the match object, use it
-                            if (match.score && match.score.fullTime) {
-                                // For finished matches, use actual score
-                                if (match.status === 'FINISHED') {
-                                    homeGoalsScored = match.score.fullTime.home || 1.5;
-                                    awayGoalsScored = match.score.fullTime.away || 1.2;
-                                }
-                            }
-                            
-                            const matchData = {
-                                homeTeam: match.homeTeam.name,
-                                awayTeam: match.awayTeam.name,
-                                league: match.competition.name,
-                                homeGoalsScored: homeGoalsScored.toString(),
-                                awayGoalsScored: awayGoalsScored.toString(),
-                                homeGoalsConceded: (awayGoalsScored * 0.8).toString(),
-                                awayGoalsConceded: (homeGoalsScored * 0.8).toString(),
-                                homeForm,
-                                awayForm
-                            };
-                            
-                            // Get AI prediction - use API only for first 5 matches to avoid rate limits
-                            let prediction;
-                            const useApiForThisMatch = i < 5; // Only use API for first 5 matches (reduced from 10)
-                            
-                            if (useApiForThisMatch && !RateLimitTracker.shouldUseLocal() && RequestQueue.consecutiveRateLimits < 2) {
-                                try {
-                                    // Check cache first
-                                    const cachedPrediction = PredictionCache.get(matchData);
-                                    if (cachedPrediction) {
-                                        prediction = cachedPrediction;
-                                    } else {
-                                        prediction = await RequestQueue.add(
-                                            () => AIPredictionEngine.getPrediction({
-                                                apiKeys: config.apiKeys,
-                                                selectedAI: config.selectedAI,
-                                                matchData
-                                            }),
-                                            i // Priority based on match index
-                                        );
-                                        // Cache the successful prediction
-                                        PredictionCache.set(matchData, prediction);
-                                        RateLimitTracker.recordSuccess();
-                                    }
-                                } catch (e) {
-                                    console.log(`API failed for match ${i}, using local prediction:`, e.message);
-                                    RateLimitTracker.recordFailure();
-                                    prediction = AIPredictionEngine.calculateLocalPrediction(matchData);
-                                }
-                            } else {
-                                // Use local prediction for matches beyond first 5 or when rate limited
-                                prediction = AIPredictionEngine.calculateLocalPrediction(matchData);
-                            }
-                            
-                            // Generate betting odds from prediction
-                            const odds = AIPredictionEngine.generateOdds(prediction, matchData);
-                            
-                            // Determine confidence label and sure bet
-                            const confidence = prediction.confidence;
-                            const confidenceLabel = confidence >= 80 ? 'High' : confidence >= 65 ? 'Medium' : 'Low';
-                            const sureBet = confidence >= 75;
-                            const sureBetLabel = sureBet ? 'SURE BET' : confidence >= 65 ? 'GOOD BET' : 'SPECULATIVE';
-                            
-                            processedMatches.push({
-                                id: match.id,
-                                index: i + 1,
-                                league: match.competition.name,
-                                leagueLogo: match.competition.emblem,
-                                homeTeam: match.homeTeam.name,
-                                homeTeamCrest: match.homeTeam.crest,
-                                awayTeam: match.awayTeam.name,
-                                awayTeamCrest: match.awayTeam.crest,
-                                utcDate: match.utcDate,
-                                date: new Date(match.utcDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
-                                time: new Date(match.utcDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                                venue: match.venue || match.homeTeam.name + ' Stadium',
-                                status: match.status,
-                                
-                                // Odds
-                                homeOdds: odds['1X2']['1'],
-                                drawOdds: odds['1X2']['X'],
-                                awayOdds: odds['1X2']['2'],
-                                markets: odds,
-                                
-                                // AI Prediction (Ensemble of Multiple Models)
-                                aiPrediction: {
-                                    // 1X2 predictions
-                                    homeWin: prediction.homeWin,
-                                    draw: prediction.draw,
-                                    awayWin: prediction.awayWin,
-                                    
-                                    // Double chance
-                                    doubleChance: prediction.doubleChance || {
-                                        homeDraw: prediction.homeWin + prediction.draw,
-                                        awayDraw: prediction.awayWin + prediction.draw,
-                                        homeAway: prediction.homeWin + prediction.awayWin
-                                    },
-                                    
-                                    // Over/Under
-                                    overUnder: prediction.overUnder || {
-                                        over1_5: 70, under1_5: 30,
-                                        over2_5: 50, under2_5: 50,
-                                        over3_5: 30, under3_5: 70
-                                    },
-                                    
-                                    // BTTS
-                                    btts: prediction.btts || { yes: 55, no: 45 },
-                                    
-                                    // Draw No Bet
-                                    drawNoBet: prediction.drawNoBet || {
-                                        home: (prediction.homeWin / (prediction.homeWin + prediction.awayWin)) * 100,
-                                        away: (prediction.awayWin / (prediction.homeWin + prediction.awayWin)) * 100
-                                    },
-                                    
-                                    // Asian Handicap
-                                    asianHandicap: prediction.asianHandicap || {
-                                        home_minus1: Math.max(0, prediction.homeWin - 15),
-                                        home_minus0_5: Math.max(0, prediction.homeWin - 5),
-                                        away_minus1: Math.max(0, prediction.awayWin - 15),
-                                        away_minus0_5: Math.max(0, prediction.awayWin - 5),
-                                        home_plus1: prediction.homeWin + prediction.draw,
-                                        away_plus1: prediction.awayWin + prediction.draw
-                                    },
-                                    
-                                    // Correct Score
-                                    correctScore: prediction.correctScore || {
-                                        "1-0": 15, "2-0": 10, "2-1": 12, "3-0": 5, "3-1": 6, "3-2": 4,
-                                        "0-0": 8, "1-1": 10, "2-2": 6,
-                                        "0-1": 8, "0-2": 5, "1-2": 6, "0-3": 2, "1-3": 3, "2-3": 2
-                                    },
-                                    
-                                    confidence: prediction.confidence,
-                                    confidenceLabel: prediction.confidence >= 80 ? 'High' : prediction.confidence >= 65 ? 'Medium' : 'Low',
-                                    predictedScore: prediction.predictedScore,
-                                    recommendedBet: prediction.homeWin > prediction.awayWin ? '1' : prediction.awayWin > prediction.homeWin ? '2' : 'X',
-                                    sureBet: prediction.confidence >= 75,
-                                    sureBetLabel: prediction.confidence >= 75 ? 'SURE BET' : prediction.confidence >= 65 ? 'GOOD BET' : 'SPECULATIVE',
-                                    reasoning: prediction.reasoning,
-                                    explanation: prediction.explanation || 'AI analysis based on team form, statistics, and historical data',
-                                    
-                                    // Ensemble information
-                                    ensembleModels: prediction.ensembleModels || [],
-                                    modelCount: prediction.modelCount || 1,
-                                    consensusScore: prediction.consensusScore || prediction.confidence,
-                                    individualPredictions: prediction.individualPredictions || []
-                                },
-                                
-                                // Team stats
-                                homeForm,
-                                awayForm,
-                                homeGoalsScored: matchData.homeGoalsScored,
-                                homeGoalsConceded: matchData.homeGoalsConceded,
-                                awayGoalsScored: matchData.awayGoalsScored,
-                                awayGoalsConceded: matchData.awayGoalsConceded,
-                                
-                                keyPlayers: { home: [], away: [] },
-                                injuries: { home: [], away: [] }
+                            // 2. Call your NEW Railway server endpoint
+                            const response = await fetch('/api/predict-batch', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ matches: chunk })
                             });
-                            
-                            setGenerationProgress(30 + Math.floor((i / total) * 70));
-                        } catch (e) {
-                            console.error(`Error processing match ${i}:`, e);
-                            // Continue processing other matches
+
+                            const predictions = await response.json();
+
+                            // 3. Merge predictions into your match objects
+                            const processedChunk = chunk.map(match => {
+                                const pred = predictions.find(p => p.id === match.id) || {};
+                                
+                                // Generate realistic form data
+                                const generateRealisticForm = (teamName, league, isHome) => {
+                                    let hash = 0;
+                                    for (let j = 0; j < teamName.length; j++) {
+                                        hash = ((hash << 5) - hash) + teamName.charCodeAt(j);
+                                        hash = hash & hash;
+                                    }
+                                    hash = Math.abs(hash);
+                                    
+                                    const leagueStrength = {
+                                        'Premier League': 0.9, 'La Liga': 0.88, 'Bundesliga': 0.85,
+                                        'Serie A': 0.85, 'Ligue 1': 0.82, 'Eredivisie': 0.75,
+                                        'Primeira Liga': 0.75, 'Championship': 0.70, 'Brasileirão': 0.78, 'MLS': 0.65
+                                    };
+                                    
+                                    const strength = leagueStrength[league] || 0.70;
+                                    const homeBonus = isHome ? 0.1 : 0;
+                                    
+                                    const form = [];
+                                    for (let j = 0; j < 5; j++) {
+                                        const seed = (hash + j * 17 + (isHome ? 31 : 0)) % 100;
+                                        const adjustedSeed = seed / 100;
+                                        const winProb = (strength + homeBonus) * 0.45;
+                                        const drawProb = 0.28;
+                                        
+                                        if (adjustedSeed < winProb) {
+                                            form.push(3);
+                                        } else if (adjustedSeed < winProb + drawProb) {
+                                            form.push(1);
+                                        } else {
+                                            form.push(0);
+                                        }
+                                    }
+                                    return form;
+                                };
+
+                                const homeForm = generateRealisticForm(match.homeTeam.name, match.competition.name, true);
+                                const awayForm = generateRealisticForm(match.awayTeam.name, match.competition.name, false);
+                                
+                                // Calculate probabilities from prediction
+                                const homeWin = pred.winner === 'Home' ? 55 : pred.winner === 'Draw' ? 30 : 25;
+                                const draw = pred.winner === 'Draw' ? 40 : 25;
+                                const awayWin = pred.winner === 'Away' ? 55 : pred.winner === 'Draw' ? 30 : 25;
+                                const confidence = 75;
+                                
+                                // Format for your UI
+                                return {
+                                    id: match.id,
+                                    index: allProcessed.length + processedChunk.indexOf(match) + 1,
+                                    league: match.competition.name,
+                                    leagueLogo: match.competition.emblem,
+                                    homeTeam: match.homeTeam.name,
+                                    homeTeamCrest: match.homeTeam.crest,
+                                    awayTeam: match.awayTeam.name,
+                                    awayTeamCrest: match.awayTeam.crest,
+                                    utcDate: match.utcDate,
+                                    date: new Date(match.utcDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+                                    time: new Date(match.utcDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                                    venue: match.venue || match.homeTeam.name + ' Stadium',
+                                    status: match.status,
+                                    homeOdds: Math.round((100 / homeWin) * 100) / 100,
+                                    drawOdds: Math.round((100 / draw) * 100) / 100,
+                                    awayOdds: Math.round((100 / awayWin) * 100) / 100,
+                                    markets: AIPredictionEngine.generateOdds({
+                                        homeWin,
+                                        draw,
+                                        awayWin,
+                                        confidence,
+                                        predictedScore: pred.score || "1-1",
+                                        reasoning: pred.reason || "Analyzing..."
+                                    }, {
+                                        homeTeam: match.homeTeam.name,
+                                        awayTeam: match.awayTeam.name,
+                                        league: match.competition.name
+                                    }),
+                                    aiPrediction: {
+                                        confidence: confidence,
+                                        predictedScore: pred.score || "1-1",
+                                        reasoning: pred.reason || "Analyzing...",
+                                        homeWin: homeWin,
+                                        draw: draw,
+                                        awayWin: awayWin,
+                                        doubleChance: {
+                                            homeDraw: homeWin + draw,
+                                            awayDraw: awayWin + draw,
+                                            homeAway: homeWin + awayWin
+                                        },
+                                        overUnder: {
+                                            over1_5: 70, under1_5: 30,
+                                            over2_5: 55, under2_5: 45,
+                                            over3_5: 30, under3_5: 70,
+                                            over0_5: 95, under0_5: 5,
+                                            over4_5: 15, under4_5: 85
+                                        },
+                                        btts: { yes: 55, no: 45 },
+                                        drawNoBet: {
+                                            home: (homeWin / (homeWin + awayWin)) * 100,
+                                            away: (awayWin / (homeWin + awayWin)) * 100
+                                        },
+                                        asianHandicap: {
+                                            home_minus1: Math.max(0, homeWin - 15),
+                                            home_minus0_5: Math.max(0, homeWin - 5),
+                                            away_minus1: Math.max(0, awayWin - 15),
+                                            away_minus0_5: Math.max(0, awayWin - 5),
+                                            home_plus1: homeWin + draw,
+                                            away_plus1: awayWin + draw
+                                        },
+                                        correctScore: {
+                                            "1-0": 15, "2-0": 10, "2-1": 12, "3-0": 5, "3-1": 6, "3-2": 4,
+                                            "0-0": 8, "1-1": 10, "2-2": 6,
+                                            "0-1": 8, "0-2": 5, "1-2": 6, "0-3": 2, "1-3": 3, "2-3": 2
+                                        },
+                                        ensembleModels: ['server-gemini'],
+                                        modelCount: 1,
+                                        consensusScore: confidence,
+                                        individualPredictions: []
+                                    },
+                                    homeForm,
+                                    awayForm,
+                                    homeGoalsScored: "1.3",
+                                    homeGoalsConceded: "1.1",
+                                    awayGoalsScored: "1.1",
+                                    awayGoalsConceded: "1.3",
+                                    keyPlayers: { home: [], away: [] },
+                                    injuries: { home: [], away: [] }
+                                };
+                            });
+
+                            allProcessed = [...allProcessed, ...processedChunk];
+                            setMatches([...allProcessed]); // Update UI incrementally
+                            setGenerationProgress(Math.floor((allProcessed.length / rawMatches.length) * 100));
+
+                            // 4. Wait 5 seconds to be safe
+                            if (i + BATCH_SIZE < rawMatches.length) {
+                                await new Promise(r => setTimeout(r, 5000));
+                            }
+                        } catch (err) {
+                            console.error("Batch failed, using local fallback", err);
+                            // Fallback to local math so the app doesn't crash
+                            const fallbackChunk = chunk.map(match => {
+                                const localPred = AIPredictionEngine.calculateLocalPrediction({
+                                    homeTeam: match.homeTeam.name,
+                                    awayTeam: match.awayTeam.name,
+                                    league: match.competition.name
+                                });
+                                return {
+                                    id: match.id,
+                                    index: allProcessed.length + chunk.indexOf(match) + 1,
+                                    league: match.competition.name,
+                                    leagueLogo: match.competition.emblem,
+                                    homeTeam: match.homeTeam.name,
+                                    homeTeamCrest: match.homeTeam.crest,
+                                    awayTeam: match.awayTeam.name,
+                                    awayTeamCrest: match.awayTeam.crest,
+                                    utcDate: match.utcDate,
+                                    date: new Date(match.utcDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+                                    time: new Date(match.utcDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                                    venue: match.venue || match.homeTeam.name + ' Stadium',
+                                    status: match.status,
+                                    homeOdds: Math.round((100 / localPred.homeWin) * 100) / 100,
+                                    drawOdds: Math.round((100 / localPred.draw) * 100) / 100,
+                                    awayOdds: Math.round((100 / localPred.awayWin) * 100) / 100,
+                                    markets: AIPredictionEngine.generateOdds(localPred, {
+                                        homeTeam: match.homeTeam.name,
+                                        awayTeam: match.awayTeam.name,
+                                        league: match.competition.name
+                                    }),
+                                    aiPrediction: {
+                                        ...localPred,
+                                        ensembleModels: ['local-fallback'],
+                                        modelCount: 1,
+                                        consensusScore: localPred.confidence,
+                                        individualPredictions: []
+                                    },
+                                    homeForm: [3, 1, 3, 1, 3],
+                                    awayForm: [1, 3, 1, 3, 1],
+                                    homeGoalsScored: "1.3",
+                                    homeGoalsConceded: "1.1",
+                                    awayGoalsScored: "1.1",
+                                    awayGoalsConceded: "1.3",
+                                    keyPlayers: { home: [], away: [] },
+                                    injuries: { home: [], away: [] }
+                                };
+                            });
+                            allProcessed = [...allProcessed, ...fallbackChunk];
+                            setMatches([...allProcessed]);
                         }
                     }
                     
-                    setMatches(processedMatches);
                     setLastGenerated(new Date());
-                    
                 } catch (error) {
-                    console.error('Error loading matches:', error);
-                    
-                    // Provide helpful error messages
-                    let errorMsg = 'Failed to fetch matches.';
-                    if (error.message.includes('Invalid API key')) {
-                        errorMsg = 'Invalid API key. Please verify your Football-Data.org credentials.';
-                    } else if (error.message.includes('Rate limit')) {
-                        errorMsg = 'Rate limit exceeded. Please wait a moment before refreshing.';
-                    } else if (error.message.includes('Access forbidden')) {
-                        errorMsg = 'Access denied. Please ensure your API key has the correct permissions.';
-                    } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-                        errorMsg = 'Network error. Please check your internet connection and try again.';
-                    }
-                    
-                    setApiError(errorMsg);
+                    setApiError("Failed to process batches: " + error.message);
                 }
-                
                 setLoading(false);
-                setGenerationProgress(100);
             };
             
             const paginatedMatches = useMemo(() => {

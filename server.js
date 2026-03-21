@@ -3,6 +3,16 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+
+// Optional: Google Generative AI SDK (for standalone prediction service)
+let GoogleGenerativeAI;
+try {
+    GoogleGenerativeAI = require('@google/generative-ai').GoogleGenerativeAI;
+    console.log('✅ Google Generative AI SDK loaded');
+} catch (e) {
+    console.log('ℹ️ Google Generative AI SDK not installed (optional for standalone service)');
+}
+
 const app = express();
 
 // Performance: Add response caching
@@ -170,6 +180,47 @@ app.get('/', (req, res) => {
 
     res.send(modifiedHtml);
   });
+});
+
+// Add new endpoint to handle the heavy AI work
+app.post('/api/predict-batch', express.json(), async (req, res) => {
+    const { matches } = req.body;
+    const googleKey = process.env.GOOGLE_AI_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
+
+    if (!matches || !Array.isArray(matches)) {
+        return res.status(400).json({ error: "Invalid matches data" });
+    }
+
+    console.log(`🤖 Processing batch of ${matches.length} matches via Server Orchestrator`);
+
+    const prompt = `Analyze these football matches. For each match, provide:
+    1. Winner (Home/Away/Draw)
+    2. Correct Score
+    3. One tactical reason for this result.
+    Matches: ${JSON.stringify(matches.map(m => ({id: m.id, h: m.homeTeam, a: m.awayTeam})))}
+    
+    Return ONLY a JSON array of objects: [{"id": 1, "winner": "...", "score": "...", "reason": "..."}]`;
+
+    try {
+        // ORCHESTRATION LOGIC:
+        // We use Gemini 1.5 Flash for the heavy lifting (10 games at once)
+        // because its free tier has much higher limits than Groq.
+        if (googleKey) {
+            const genAI = new GoogleGenerativeAI(googleKey);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            const text = response.text();
+            const cleanJson = text.match(/\[.*\]/s)[0]; // Extract array
+            return res.json(JSON.parse(cleanJson));
+        } 
+        
+        throw new Error("No AI providers available on server");
+    } catch (error) {
+        console.error("Server Prediction Error:", error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Fallback to index.html for SPA routing

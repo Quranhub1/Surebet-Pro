@@ -21,6 +21,7 @@
   "author": "SureBet Pro",
   "license": "MIT",
   "dependencies": {
+    "@google/generative-ai": "^0.21.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "serve": "^14.2.1"
