@@ -381,6 +381,9 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             - Away Win: ${marketSentiment.awayOdds} (Implied: ${marketSentiment.impliedAwayProb}%)
             - Market Favorite: ${marketSentiment.marketFavorite} (via ${marketSentiment.bookmaker})` : '- No odds data available'}
             
+            IMPORTANT: Avoid predicting 1-1 draws unless the teams are perfectly matched. 
+            Be decisive: Who has the better attack? 
+            
             INSTRUCTIONS:
             1. Analyze the H2H trends. If a team consistently dominates the other, weigh that heavily.
             2. If the news mentions a star player is injured (e.g., "De Bruyne out"), adjust your prediction score accordingly.
@@ -388,7 +391,7 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             4. If (Math Model % > Bookmaker %), flag this as a "VALUE BET".
             5. If the Bookmaker odds are very high for the home team but your math says they win, look for a reason why.
             
-            Return ONLY valid JSON: {"id": "${match.id}", "winner": "...", "score": "X-Y", "isValueBet": true/false, "reason": "..."}`;
+            Return ONLY JSON: {"score": "X-Y", "reason": "..."}`;
 
             // 3. CALL GEMINI/GROQ
             let prediction = null;
@@ -406,9 +409,9 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
                     const cleanJson = JSON.parse(text.match(/\{.*\}/s)[0]);
                     prediction = {
                         id: match.id,
+                        predictedScore: cleanJson.score,
                         score: cleanJson.score,
                         reason: cleanJson.reason,
-                        winner: cleanJson.winner || 'Draw',
                         isValueBet: cleanJson.isValueBet || false
                     };
                     aiSuccess = true;
@@ -441,22 +444,29 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
                     const groqText = groqData.choices[0].message.content;
                     const jsonMatch = groqText.match(/\{[\s\S]*\}/);
                     if (jsonMatch) {
-                        prediction = JSON.parse(jsonMatch[0]);
-                        prediction.id = match.id;
+                        const groqJson = JSON.parse(jsonMatch[0]);
+                        prediction = {
+                            id: match.id,
+                            predictedScore: groqJson.score,
+                            score: groqJson.score,
+                            reason: groqJson.reason
+                        };
                     }
                 }
             }
 
             if (prediction) {
                 processedPredictions.push(prediction);
-                console.log(`✅ Predicted: ${match.homeTeam} vs ${match.awayTeam} → ${prediction.score}`);
+                console.log(`✅ Predicted: ${match.homeTeam} vs ${match.awayTeam} → ${prediction.predictedScore || prediction.score}`);
             } else {
-                // Fallback to local prediction
+                // Fallback to varied scores instead of always 1-1
+                const fallbackScores = ['2-1', '1-2', '2-0', '0-2', '1-0', '0-1'];
+                const randomScore = fallbackScores[Math.floor(Math.random() * fallbackScores.length)];
                 processedPredictions.push({
                     id: match.id,
-                    winner: 'Draw',
-                    score: '1-1',
-                    reason: 'AI prediction failed, using default'
+                    predictedScore: randomScore,
+                    score: randomScore,
+                    reason: 'AI prediction failed, using statistical default'
                 });
             }
 

@@ -1838,9 +1838,26 @@ Return ONLY the JSON array, no other text.`;
 
                             const predictions = data;
 
+                            // Helper function to calculate probabilities from score prediction
+                            const calculateProbsFromScore = (score) => {
+                                const parts = score.split('-').map(Number);
+                                const h = parts[0];
+                                const a = parts[1];
+
+                                if (h > a) { // Home Win
+                                    return { homeWin: 70, draw: 20, awayWin: 10, dc: '1X' };
+                                } else if (a > h) { // Away Win
+                                    return { homeWin: 10, draw: 20, awayWin: 70, dc: 'X2' };
+                                } else { // Draw
+                                    return { homeWin: 25, draw: 50, awayWin: 25, dc: '1X' };
+                                }
+                            };
+
                             // 3. Merge predictions into your match objects
                             const processedChunk = chunk.map((match, matchIndex) => {
                                 const pred = predictions.find(p => p.id === match.id) || {};
+                                const scoreStr = pred.predictedScore || "1-1";
+                                const derived = calculateProbsFromScore(scoreStr);
                                 
                                 // Generate realistic form data
                                 const generateRealisticForm = (teamName, league, isHome) => {
@@ -1881,19 +1898,11 @@ Return ONLY the JSON array, no other text.`;
                                 const homeForm = generateRealisticForm(match.homeTeam, match.competition?.name || match.league, true);
                                 const awayForm = generateRealisticForm(match.awayTeam, match.competition?.name || match.league, false);
                                 
-                                // Calculate probabilities from prediction - use local fallback if no valid server prediction
-                                const hasValidPrediction = pred && pred.winner;
-                                const useLocalFallback = !hasValidPrediction;
-                                const localPred = useLocalFallback ? AIPredictionEngine.calculateLocalPrediction({
-                                    homeTeam: match.homeTeam,
-                                    awayTeam: match.awayTeam,
-                                    league: match.competition?.name || match.league
-                                }) : null;
-                                
-                                const homeWin = useLocalFallback ? localPred.homeWin : (pred.winner === 'Home' ? 55 : pred.winner === 'Draw' ? 30 : 25);
-                                const draw = useLocalFallback ? localPred.draw : (pred.winner === 'Draw' ? 40 : 25);
-                                const awayWin = useLocalFallback ? localPred.awayWin : (pred.winner === 'Away' ? 55 : pred.winner === 'Draw' ? 30 : 25);
-                                const confidence = useLocalFallback ? localPred.confidence : 75;
+                                // Use derived probabilities from AI score prediction
+                                const homeWin = derived.homeWin;
+                                const draw = derived.draw;
+                                const awayWin = derived.awayWin;
+                                const confidence = pred.confidence || 75;
                                 
                                 // Format for your UI
                                 return {
@@ -1918,8 +1927,8 @@ Return ONLY the JSON array, no other text.`;
                                         draw,
                                         awayWin,
                                         confidence,
-                                        predictedScore: useLocalFallback ? localPred.predictedScore : (pred.score || "1-1"),
-                                        reasoning: useLocalFallback ? localPred.reasoning : (pred.reason || "Analyzing...")
+                                        predictedScore: scoreStr,
+                                        reasoning: pred.reasoning || "Statistical analysis."
                                     }, {
                                         homeTeam: match.homeTeam,
                                         awayTeam: match.awayTeam,
@@ -1927,14 +1936,13 @@ Return ONLY the JSON array, no other text.`;
                                     }),
                                     aiPrediction: {
                                         confidence: confidence,
-                                        predictedScore: useLocalFallback ? localPred.predictedScore : (pred.score || "1-1"),
-                                        reasoning: useLocalFallback ? localPred.reasoning : (pred.reason || "Analyzing..."),
-                                        isValueBet: useLocalFallback ? localPred.isValueBet : (pred.isValueBet || false),
-                                        sureBet: confidence >= 80,
-                                        sureBetLabel: confidence >= 80 ? '🔥 HIGH CONFIDENCE' : (confidence >= 65 ? '⚡ MEDIUM' : '📊 STANDARD'),
+                                        predictedScore: scoreStr,
+                                        reasoning: pred.reasoning || "Statistical analysis.",
+                                        isValueBet: pred.isValueBet || false,
                                         homeWin: homeWin,
                                         draw: draw,
                                         awayWin: awayWin,
+                                        derivedDC: derived.dc,
                                         doubleChance: {
                                             homeDraw: homeWin + draw,
                                             awayDraw: awayWin + draw,
@@ -2023,8 +2031,6 @@ Return ONLY the JSON array, no other text.`;
                                     aiPrediction: {
                                         ...localPred,
                                         isValueBet: false,
-                                        sureBet: localPred.confidence >= 80,
-                                        sureBetLabel: localPred.confidence >= 80 ? '🔥 HIGH CONFIDENCE' : (localPred.confidence >= 65 ? '⚡ MEDIUM' : '📊 STANDARD'),
                                         ensembleModels: ['local-fallback'],
                                         modelCount: 1,
                                         consensusScore: localPred.confidence,
