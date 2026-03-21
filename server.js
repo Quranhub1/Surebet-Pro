@@ -25,6 +25,58 @@ try {
     console.log('ℹ️ Tavily AI SDK not installed (optional for news)');
 }
 
+// Function to get market sentiment (odds from bookmakers)
+async function getMarketSentiment(leagueKey, homeTeam, awayTeam) {
+    const oddsApiKey = process.env.ODDS_API_KEY;
+    if (!oddsApiKey) {
+        console.log('⚠️ ODDS_API_KEY not configured');
+        return null;
+    }
+    try {
+        // Fetch odds from major bookmakers
+        const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${leagueKey}/odds`, {
+            params: {
+                apiKey: oddsApiKey,
+                regions: 'uk,eu',
+                markets: 'h2h'
+            }
+        });
+
+        // Find the specific match in the odds list
+        const matchOdds = response.data.find(m => 
+            m.home_team.toLowerCase().includes(homeTeam.toLowerCase()) || 
+            m.away_team.toLowerCase().includes(awayTeam.toLowerCase())
+        );
+
+        if (!matchOdds || !matchOdds.bookmakers || !matchOdds.bookmakers[0]) {
+            return null;
+        }
+
+        // Use the first bookmaker's odds (e.g., Bet365 or Pinnacle)
+        const odds = matchOdds.bookmakers[0].markets[0].outcomes;
+        const homeOdds = odds.find(o => o.name.toLowerCase().includes(homeTeam.toLowerCase().split(' ')[0]));
+        const awayOdds = odds.find(o => o.name.toLowerCase().includes(awayTeam.toLowerCase().split(' ')[0]));
+
+        if (!homeOdds || !awayOdds) return null;
+
+        // Calculate "Implied Probability" (1 / odds)
+        const impliedHomeProb = Math.round((1 / homeOdds.price) * 100);
+        const impliedAwayProb = Math.round((1 / awayOdds.price) * 100);
+
+        return {
+            homeOdds: homeOdds.price,
+            awayOdds: awayOdds.price,
+            impliedHomeProb,
+            impliedAwayProb,
+            marketFavorite: impliedHomeProb > impliedAwayProb ? 'Home' : 'Away',
+            bookmaker: matchOdds.bookmakers[0].title
+        };
+    } catch (e) {
+        console.error("Market Sentiment Error:", e.message);
+        return null;
+    }
+}
+
 // Function to get match news
 async function getMatchNews(homeTeam, awayTeam) {
     if (!tavily) {
@@ -279,13 +331,14 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
 
     const processedPredictions = [];
 
-    // Process each match individually with news and context search
+    // Process each match individually with news, context, and market sentiment
     for (const match of matches) {
         try {
             // 1. FETCH DEEP DATA (The "Data Scientist" Agent)
             console.log(`📊 Getting context for: ${match.homeTeam} vs ${match.awayTeam}`);
             let matchContext = { h2h: [], homeStats: "N/A", awayStats: "N/A" };
             let liveNews = "No recent news available";
+            let marketSentiment = null;
             
             // Try to get head-to-head data if we have homeId/awayId
             if (match.homeId && match.awayId) {
@@ -305,7 +358,25 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
                 console.log(`⚠️ Could not get news for ${match.homeTeam} vs ${match.awayTeam}:`, newsErr.message);
             }
 
-            // 3. CONSTRUCT DATA-RICH PROMPT
+            // 3. GET MARKET SENTIMENT (Bookmaker odds)
+            console.log(`📈 Getting market sentiment for: ${match.homeTeam} vs ${match.awayTeam}`);
+            try {
+                // Map league names to odds-api keys
+                const leagueKeyMap = {
+                    'Premier League': 'epl',
+                    'La Liga': 'la_liga',
+                    'Bundesliga': 'bundesliga',
+                    'Serie A': 'serie_a',
+                    'Ligue 1': 'ligue_1',
+                    'Championship': 'efl_championship'
+                };
+                const leagueKey = leagueKeyMap[match.competition?.name || match.league] || 'soccer';
+                marketSentiment = await getMarketSentiment(leagueKey, match.homeTeam, match.awayTeam);
+            } catch (marketErr) {
+                console.log(`⚠️ Could not get market sentiment:`, marketErr.message);
+            }
+
+            // 4. CONSTRUCT DATA-RICH PROMPT
             const prompt = `
             MATCH: ${match.homeTeam} vs ${match.awayTeam}
             LEAGUE: ${match.competition?.name || match.league || 'Unknown League'}
@@ -317,12 +388,19 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             
             LATEST NEWS: ${liveNews}
             
-            INSTRUCTIONS:
-            Analyze the H2H trends. If a team consistently dominates the other, weigh that heavily.
-            If the news mentions a star player is injured (e.g., "De Bruyne out"), adjust your prediction score accordingly.
-            Calculate the predicted score based on the Season Stats and News.
+            BOOKMAKER ODDS:
+            ${marketSentiment ? `- Home Win: ${marketSentiment.homeOdds} (Implied: ${marketSentiment.impliedHomeProb}%)
+            - Away Win: ${marketSentiment.awayOdds} (Implied: ${marketSentiment.impliedAwayProb}%)
+            - Market Favorite: ${marketSentiment.marketFavorite} (via ${marketSentiment.bookmaker})` : '- No odds data available'}
             
-            Return ONLY valid JSON: {"id": "${match.id}", "winner": "...", "score": "X-Y", "reason": "..."}`;
+            INSTRUCTIONS:
+            1. Analyze the H2H trends. If a team consistently dominates the other, weigh that heavily.
+            2. If the news mentions a star player is injured (e.g., "De Bruyne out"), adjust your prediction score accordingly.
+            3. Compare your Math Model with the Bookmaker Implied Probability.
+            4. If (Math Model % > Bookmaker %), flag this as a "VALUE BET".
+            5. If the Bookmaker odds are very high for the home team but your math says they win, look for a reason why.
+            
+            Return ONLY valid JSON: {"id": "${match.id}", "winner": "...", "score": "X-Y", "isValueBet": true/false, "reason": "..."}`;
 
             // 3. CALL GEMINI/GROQ
             let prediction = null;

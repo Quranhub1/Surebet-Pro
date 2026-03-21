@@ -1921,6 +1921,7 @@ Return ONLY the JSON array, no other text.`;
                                         confidence: confidence,
                                         predictedScore: pred.score || "1-1",
                                         reasoning: pred.reason || "Analyzing...",
+                                        isValueBet: pred.isValueBet || false,
                                         homeWin: homeWin,
                                         draw: draw,
                                         awayWin: awayWin,
@@ -2011,6 +2012,7 @@ Return ONLY the JSON array, no other text.`;
                                     }),
                                     aiPrediction: {
                                         ...localPred,
+                                        isValueBet: false,
                                         ensembleModels: ['local-fallback'],
                                         modelCount: 1,
                                         consensusScore: localPred.confidence,
@@ -2453,6 +2455,11 @@ Return ONLY the JSON array, no other text.`;
                                                                     <span className="px-2 py-1 rounded text-xs font-bold bg-slate-700 text-white">
                                                                         {pred.predictedScore}
                                                                     </span>
+                                                                    {pred.isValueBet && (
+                                                                        <span className="ml-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 px-1.5 py-0.5 rounded text-[10px] font-bold animate-pulse">
+                                                                            VALUE
+                                                                        </span>
+                                                                    )}
                                                                 </td>
                                                             </tr>
                                                             

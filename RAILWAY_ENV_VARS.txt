@@ -55,5 +55,8 @@ TAVILY_API_KEY=your_tavily_api_key_here
 # RapidAPI Football API (for head-to-head stats)
 RAPIDAPI_KEY=your_rapidapi_key_here
 
+# The Odds API (for bookmaker odds)
+ODDS_API_KEY=your_odds_api_key_here
+
 # Anthropic - Claude
 # ANTHROPIC_API_KEY=your_anthropic_api_key_here
