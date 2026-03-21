@@ -1,34 +1,18 @@
 {
   "name": "surebet-pro",
   "version": "1.0.0",
-  "description": "Automated Sports Predictions - Professional betting site with AI-powered predictions",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "serve": "serve -s . -l 3000",
-    "build": "echo 'No build step required for static site'",
-    "test-env": "node test-env.js"
+    "dev": "node server.js"
   },
-  "keywords": [
-    "sports",
-    "betting",
-    "predictions",
-    "football",
-    "AI",
-    "machine-learning"
-  ],
-  "author": "SureBet Pro",
-  "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@tavily/core": "^1.0.0",
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "serve": "^14.2.1"
+    "express": "^4.18.2"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   }
 }
