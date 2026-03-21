@@ -1809,7 +1809,16 @@ Return ONLY the JSON array, no other text.`;
                     let allProcessed = [];
 
                     for (let i = 0; i < rawMatches.length; i += BATCH_SIZE) {
-                        const chunk = rawMatches.slice(i, i + BATCH_SIZE);
+                        // Map matches to include IDs for H2H context
+                        const chunk = rawMatches.slice(i, i + BATCH_SIZE).map(m => ({
+                            id: m.id,
+                            homeId: m.homeTeam?.id || m.homeTeamCrest?.id || null,
+                            awayId: m.awayTeam?.id || m.awayTeamCrest?.id || null,
+                            homeTeam: m.homeTeam?.name || m.homeTeam,
+                            awayTeam: m.awayTeam?.name || m.awayTeam,
+                            competition: { name: m.league || m.competition?.name },
+                            league: m.competition?.name || m.league
+                        }));
                         
                         try {
                             // 2. Call your NEW Railway server endpoint
