@@ -1845,18 +1845,26 @@ Return ONLY the JSON array, no other text.`;
                                 const a = parts[1];
 
                                 if (h > a) { // Home Win
-                                    return { homeWin: 45, draw: 30, awayWin: 25, dc: '1X' };
+                                    return { homeWin: 40, draw: 35, awayWin: 25, dc: '1X' };
                                 } else if (a > h) { // Away Win
-                                    return { homeWin: 25, draw: 30, awayWin: 45, dc: 'X2' };
+                                    return { homeWin: 25, draw: 35, awayWin: 40, dc: 'X2' };
                                 } else { // Draw
                                     return { homeWin: 30, draw: 40, awayWin: 30, dc: '1X' };
                                 }
                             };
+                            
+                            // Debug: Log server predictions
+                            console.log('📡 Server predictions received:', predictions.length);
 
                             // 3. Merge predictions into your match objects
                             const processedChunk = chunk.map((match, matchIndex) => {
                                 const pred = predictions.find(p => p.id === match.id) || {};
-                                const scoreStr = pred.predictedScore || "1-1";
+                                const scoreStr = pred.predictedScore || pred.score || "1-1";
+                                
+                                if (!pred.predictedScore && !pred.score) {
+                                    console.log(`⚠️ No AI prediction for ${match.homeTeam} vs ${match.awayTeam}, using fallback`);
+                                }
+                                
                                 const derived = calculateProbsFromScore(scoreStr);
                                 
                                 // Generate realistic form data
