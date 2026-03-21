@@ -1930,6 +1930,8 @@ Return ONLY the JSON array, no other text.`;
                                         predictedScore: useLocalFallback ? localPred.predictedScore : (pred.score || "1-1"),
                                         reasoning: useLocalFallback ? localPred.reasoning : (pred.reason || "Analyzing..."),
                                         isValueBet: useLocalFallback ? localPred.isValueBet : (pred.isValueBet || false),
+                                        sureBet: confidence >= 80,
+                                        sureBetLabel: confidence >= 80 ? '🔥 HIGH CONFIDENCE' : (confidence >= 65 ? '⚡ MEDIUM' : '📊 STANDARD'),
                                         homeWin: homeWin,
                                         draw: draw,
                                         awayWin: awayWin,
@@ -2021,6 +2023,8 @@ Return ONLY the JSON array, no other text.`;
                                     aiPrediction: {
                                         ...localPred,
                                         isValueBet: false,
+                                        sureBet: localPred.confidence >= 80,
+                                        sureBetLabel: localPred.confidence >= 80 ? '🔥 HIGH CONFIDENCE' : (localPred.confidence >= 65 ? '⚡ MEDIUM' : '📊 STANDARD'),
                                         ensembleModels: ['local-fallback'],
                                         modelCount: 1,
                                         consensusScore: localPred.confidence,
