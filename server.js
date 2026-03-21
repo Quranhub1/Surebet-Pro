@@ -7,13 +7,8 @@ const fs = require('fs');
 const https = require('https');
 
 // Optional: Google Generative AI SDK (for standalone prediction service)
-let GoogleGenerativeAI;
-try {
-    GoogleGenerativeAI = require('@google/generative-ai').GoogleGenerativeAI;
-    console.log('✅ Google Generative AI SDK loaded');
-} catch (e) {
-    console.log('ℹ️ Google Generative AI SDK not installed (optional for standalone service)');
-}
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+console.log('✅ Google Generative AI SDK loaded');
 
 // Optional: Tavily AI for match news search
 let tavily;
@@ -405,8 +400,32 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             // 3. CALL GEMINI/GROQ
             let prediction = null;
             
-            // Use Groq (more reliable than Gemini for this use case)
-            if (groqKey) {
+            // Try Gemini first, fallback to Groq if it fails
+            let aiSuccess = false;
+            
+            // Try Gemini 1.5 Flash
+            if (googleKey) {
+                try {
+                    const genAI = new GoogleGenerativeAI(googleKey);
+                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+                    const aiResponse = await model.generateContent(prompt);
+                    const text = aiResponse.response.text();
+                    const cleanJson = JSON.parse(text.match(/\{.*\}/s)[0]);
+                    prediction = {
+                        id: match.id,
+                        score: cleanJson.score,
+                        reason: cleanJson.reason,
+                        winner: cleanJson.winner || 'Draw',
+                        isValueBet: cleanJson.isValueBet || false
+                    };
+                    aiSuccess = true;
+                } catch (geminiErr) {
+                    console.log(`⚠️ Gemini failed: ${geminiErr.message}. Trying Groq...`);
+                }
+            }
+            
+            // Fallback to Groq if Gemini failed or not available
+            if (!aiSuccess && groqKey) {
                 const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
