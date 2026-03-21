@@ -400,7 +400,7 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             if (googleKey) {
                 try {
                     const genAI = new GoogleGenerativeAI(googleKey);
-                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
                     const aiResponse = await model.generateContent(prompt);
                     const text = aiResponse.response.text();
                     const cleanJson = JSON.parse(text.match(/\{.*\}/s)[0]);
