@@ -279,12 +279,25 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
 
     const processedPredictions = [];
 
-    // Process each match individually with news search
+    // Process each match individually with news and context search
     for (const match of matches) {
         try {
-            // 1. CALL THE SEARCH AGENT (The "Researcher")
-            console.log(`📰 Getting news for: ${match.homeTeam} vs ${match.awayTeam}`);
+            // 1. FETCH DEEP DATA (The "Data Scientist" Agent)
+            console.log(`📊 Getting context for: ${match.homeTeam} vs ${match.awayTeam}`);
+            let matchContext = { h2h: [], homeStats: "N/A", awayStats: "N/A" };
             let liveNews = "No recent news available";
+            
+            // Try to get head-to-head data if we have homeId/awayId
+            if (match.homeId && match.awayId) {
+                try {
+                    matchContext = await getMatchContext(match.id, match.homeId, match.awayId);
+                } catch (ctxErr) {
+                    console.log(`⚠️ Could not get H2H data:`, ctxErr.message);
+                }
+            }
+            
+            // 2. CALL THE SEARCH AGENT (The "Researcher")
+            console.log(`📰 Getting news for: ${match.homeTeam} vs ${match.awayTeam}`);
             try {
                 const newsResult = await getMatchNews(match.homeTeam, match.awayTeam);
                 liveNews = newsResult.answer || "No recent news available";
@@ -292,20 +305,22 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
                 console.log(`⚠️ Could not get news for ${match.homeTeam} vs ${match.awayTeam}:`, newsErr.message);
             }
 
-            // 2. CONSTRUCT THE ENHANCED PROMPT
+            // 3. CONSTRUCT DATA-RICH PROMPT
             const prompt = `
             MATCH: ${match.homeTeam} vs ${match.awayTeam}
-            LEAGUE: ${match.competition?.name || 'Unknown League'}
+            LEAGUE: ${match.competition?.name || match.league || 'Unknown League'}
+            
+            HISTORICAL H2H (Last 5): ${matchContext.h2h.length > 0 ? matchContext.h2h.join(', ') : 'No H2H data available'}
+            SEASON STATS: 
+            - Home: ${matchContext.homeStats}
+            - Away: ${matchContext.awayStats}
+            
             LATEST NEWS: ${liveNews}
             
             INSTRUCTIONS:
-            As a Pro Scout, analyze the match. 
-            IMPORTANT: If the news mentions a star player is injured (e.g., "De Bruyne out"), adjust your prediction score accordingly.
-            
-            Provide:
-            1. Winner (Home/Away/Draw)
-            2. Correct Score (e.g., "2-1")
-            3. A detailed tactical reason based on the news provided
+            Analyze the H2H trends. If a team consistently dominates the other, weigh that heavily.
+            If the news mentions a star player is injured (e.g., "De Bruyne out"), adjust your prediction score accordingly.
+            Calculate the predicted score based on the Season Stats and News.
             
             Return ONLY valid JSON: {"id": "${match.id}", "winner": "...", "score": "X-Y", "reason": "..."}`;
 
