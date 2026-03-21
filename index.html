@@ -338,19 +338,59 @@
         // AI PREDICTION ENGINE (Using Ensemble of Multiple Models)
         // ============================================
         
-        // Request Queue for rate limiting - IMPROVED VERSION
+        // Prediction cache to avoid redundant API calls
+        const PredictionCache = {
+            cache: new Map(),
+            maxAge: 30 * 60 * 1000, // 30 minutes cache
+            
+            getKey: function(matchData) {
+                return `${matchData.homeTeam}-${matchData.awayTeam}-${matchData.league}`.toLowerCase().replace(/\s+/g, '-');
+            },
+            
+            get: function(matchData) {
+                const key = this.getKey(matchData);
+                const cached = this.cache.get(key);
+                if (cached && (Date.now() - cached.timestamp) < this.maxAge) {
+                    console.log('📦 Using cached prediction for:', matchData.homeTeam, 'vs', matchData.awayTeam);
+                    return cached.prediction;
+                }
+                return null;
+            },
+            
+            set: function(matchData, prediction) {
+                const key = this.getKey(matchData);
+                this.cache.set(key, {
+                    prediction: prediction,
+                    timestamp: Date.now()
+                });
+            },
+            
+            clear: function() {
+                this.cache.clear();
+            }
+        };
+        
+        // Request Queue for rate limiting - IMPROVED VERSION with better backoff
         const RequestQueue = {
             queue: [],
             processing: false,
             lastRequestTime: 0,
-            minDelay: 5000, // Increased to 5 seconds between requests (Groq free tier is limited)
-            maxRetries: 2, // Reduced retries to avoid wasting rate limit
+            minDelay: 8000, // Increased to 8 seconds between requests to stay well under rate limit
+            maxRetries: 1, // Reduced to just 1 retry to avoid wasting rate limit
             rateLimited: false,
             rateLimitResetTime: 0,
+            consecutiveRateLimits: 0,
+            maxConsecutiveRateLimits: 5, // After 5 consecutive rate limits, stop trying
             
             // Add request to queue
             add: async function(requestFn, priority = 0) {
                 return new Promise((resolve, reject) => {
+                    // If we've hit too many rate limits, reject immediately
+                    if (this.consecutiveRateLimits >= this.maxConsecutiveRateLimits) {
+                        reject(new Error('Too many rate limit errors - API overloaded'));
+                        return;
+                    }
+                    
                     this.queue.push({ requestFn, resolve, reject, priority, retries: 0, addedAt: Date.now() });
                     this.queue.sort((a, b) => b.priority - a.priority); // Higher priority first
                     this.process();
@@ -371,7 +411,7 @@
                         const waitTime = this.rateLimitResetTime - Date.now();
                         if (waitTime > 0) {
                             console.log(`⏳ Rate limited. Waiting ${Math.ceil(waitTime/1000)}s before next request...`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
+                            await new Promise(resolve => setTimeout(resolve, waitTime + 1000)); // Add extra buffer
                         }
                         this.rateLimited = false;
                     }
@@ -387,6 +427,7 @@
                     try {
                         this.lastRequestTime = Date.now();
                         const result = await item.requestFn();
+                        this.consecutiveRateLimits = 0; // Reset on success
                         item.resolve(result);
                     } catch (error) {
                         // Check if it's a rate limit error
@@ -394,23 +435,27 @@
                             error.message.includes('429') || 
                             error.message.includes('rate_limit') || 
                             error.message.includes('Too Many Requests') ||
-                            error.message.includes('Rate limit')
+                            error.message.includes('Rate limit') ||
+                            error.message.includes('Invalid response') // Also treat parse errors as rate limits
                         );
                         
                         if (isRateLimit) {
-                            // Set rate limited state with backoff
+                            this.consecutiveRateLimits++;
+                            
+                            // Set rate limited state with longer backoff
                             this.rateLimited = true;
-                            const backoffSeconds = Math.pow(3, item.retries + 1) * 2; // 6s, 18s
+                            const backoffSeconds = Math.min(30, Math.pow(2, this.consecutiveRateLimits) * 3); // Exponential backoff, max 30s
                             this.rateLimitResetTime = Date.now() + (backoffSeconds * 1000);
                             
-                            if (item.retries < this.maxRetries) {
-                                console.log(`⏳ Rate limited. Will retry in ${backoffSeconds}s (attempt ${item.retries + 1}/${this.maxRetries})`);
+                            console.log(`⏳ Rate limited (${this.consecutiveRateLimits}/${this.maxConsecutiveRateLimits}). Backing off for ${backoffSeconds}s`);
+                            
+                            if (item.retries < this.maxRetries && this.consecutiveRateLimits < this.maxConsecutiveRateLimits) {
                                 item.retries++;
                                 this.queue.unshift(item); // Put back at front of queue
                                 continue;
                             } else {
-                                console.log(`❌ Max retries exceeded for rate limit. Skipping request.`);
-                                item.reject(new Error('Rate limit exceeded - max retries'));
+                                console.log(`❌ Skipping request due to rate limiting`);
+                                item.reject(new Error('Rate limit exceeded'));
                             }
                         } else {
                             item.reject(error);
@@ -419,6 +464,14 @@
                 }
                 
                 this.processing = false;
+            },
+            
+            // Reset the queue state
+            reset: function() {
+                this.queue = [];
+                this.processing = false;
+                this.rateLimited = false;
+                this.consecutiveRateLimits = 0;
             }
         };
         
@@ -433,11 +486,11 @@
                 this.consecutiveFailures++;
                 this.lastFailureTime = Date.now();
                 
-                // If we've had 3+ consecutive failures, switch to local-only mode
-                if (this.consecutiveFailures >= 3) {
+                // If we've had 2+ consecutive failures, switch to local-only mode
+                if (this.consecutiveFailures >= 2) {
                     this.useLocalOnly = true;
-                    this.localOnlyUntil = Date.now() + (60 * 1000); // 1 minute cooldown
-                    console.log('⚠️ Too many API failures. Switching to local predictions for 1 minute.');
+                    this.localOnlyUntil = Date.now() + (120 * 1000); // 2 minute cooldown (increased)
+                    console.log('⚠️ Too many API failures. Switching to local predictions for 2 minutes.');
                 }
             },
             
@@ -1552,6 +1605,9 @@ Respond with ONLY valid JSON:
                     return;
                 }
                 
+                // Reset the request queue to clear any pending requests from previous loads
+                RequestQueue.reset();
+                
                 setLoading(true);
                 setGenerationProgress(0);
                 setApiError(null);
@@ -1700,15 +1756,38 @@ Respond with ONLY valid JSON:
                                 awayForm
                             };
                             
-                            // Get AI prediction using configured provider with rate limiting
-                            const prediction = await RequestQueue.add(
-                                () => AIPredictionEngine.getPrediction({
-                                    apiKeys: config.apiKeys,
-                                    selectedAI: config.selectedAI,
-                                    matchData
-                                }),
-                                i // Priority based on match index (earlier matches processed first)
-                            );
+                            // Get AI prediction - use API only for first 5 matches to avoid rate limits
+                            let prediction;
+                            const useApiForThisMatch = i < 5; // Only use API for first 5 matches (reduced from 10)
+                            
+                            if (useApiForThisMatch && !RateLimitTracker.shouldUseLocal() && RequestQueue.consecutiveRateLimits < 2) {
+                                try {
+                                    // Check cache first
+                                    const cachedPrediction = PredictionCache.get(matchData);
+                                    if (cachedPrediction) {
+                                        prediction = cachedPrediction;
+                                    } else {
+                                        prediction = await RequestQueue.add(
+                                            () => AIPredictionEngine.getPrediction({
+                                                apiKeys: config.apiKeys,
+                                                selectedAI: config.selectedAI,
+                                                matchData
+                                            }),
+                                            i // Priority based on match index
+                                        );
+                                        // Cache the successful prediction
+                                        PredictionCache.set(matchData, prediction);
+                                        RateLimitTracker.recordSuccess();
+                                    }
+                                } catch (e) {
+                                    console.log(`API failed for match ${i}, using local prediction:`, e.message);
+                                    RateLimitTracker.recordFailure();
+                                    prediction = AIPredictionEngine.calculateLocalPrediction(matchData);
+                                }
+                            } else {
+                                // Use local prediction for matches beyond first 5 or when rate limited
+                                prediction = AIPredictionEngine.calculateLocalPrediction(matchData);
+                            }
                             
                             // Generate betting odds from prediction
                             const odds = AIPredictionEngine.generateOdds(prediction, matchData);
