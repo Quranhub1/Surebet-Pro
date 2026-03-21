@@ -405,28 +405,8 @@ app.post('/api/predict-batch', express.json(), async (req, res) => {
             // 3. CALL GEMINI/GROQ
             let prediction = null;
             
-            // Try Google Gemini first
-            if (googleKey && GoogleGenerativeAI) {
-                try {
-                    const genAI = new GoogleGenerativeAI(googleKey);
-                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
-                    const result = await model.generateContent(prompt);
-                    const response = await result.response;
-                    const text = response.text();
-                    
-                    // Try to extract JSON from response
-                    const jsonMatch = text.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                        prediction = JSON.parse(jsonMatch[0]);
-                        prediction.id = match.id; // Ensure ID is set
-                    }
-                } catch (geminiErr) {
-                    console.log(`⚠️ Gemini failed: ${geminiErr.message}. Falling back to Groq...`);
-                }
-            }
-            
-            // Fallback to Groq if Gemini failed or not available
-            if (!prediction && groqKey) {
+            // Use Groq (more reliable than Gemini for this use case)
+            if (groqKey) {
                 const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
