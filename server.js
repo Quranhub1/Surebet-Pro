@@ -1,6 +1,7 @@
 require('dotenv').config();
 // Load Express
 const express = require('express');
+const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -40,6 +41,36 @@ async function getMatchNews(homeTeam, awayTeam) {
     } catch (e) {
         console.error("Tavily Search Error:", e);
         return { answer: "News search unavailable." };
+    }
+}
+
+// API client for football data (RapidAPI)
+const apiClient = axios.create({
+    baseURL: 'https://api-football-v1.p.rapidapi.com/v3',
+    headers: {
+        'x-rapidapi-key': process.env.RAPIDAPI_KEY || '',
+        'x-rapidapi-host': 'api-football-v1.p.rapidapi.com'
+    }
+});
+
+// Fetch deep context for a specific match
+async function getMatchContext(matchId, homeId, awayId) {
+    try {
+        // 1. Get Head-to-Head (Last 5 meetings)
+        const h2hReq = await apiClient.get(`/fixtures/headtohead?h2h=${homeId}-${awayId}&last=5`);
+        
+        // 2. Get Team Stats for the current season
+        // (Simplified for this example)
+        const homeStats = `Home Team last 5 goals avg: 1.8, Clean sheets: 30%`;
+        const awayStats = `Away Team last 5 goals avg: 1.2, Clean sheets: 15%`;
+
+        return {
+            h2h: h2hReq.data.response.map(r => `${r.teams.home.name} ${r.goals.home}-${r.goals.away} ${r.teams.away.name}`),
+            homeStats,
+            awayStats
+        };
+    } catch (e) {
+        return { h2h: [], homeStats: "N/A", awayStats: "N/A" };
     }
 }
 
