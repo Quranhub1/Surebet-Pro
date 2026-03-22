@@ -154,13 +154,29 @@ async function processBatch(matches, startIndex) {
             
             if (prediction) {
                 predictionsCache[match.id] = { 
-                    ...match, 
+                    id: match.id,
+                    homeTeam: match.homeTeam,
+                    awayTeam: match.awayTeam,
+                    homeId: match.homeId,
+                    awayId: match.awayId,
+                    league: match.league,
+                    status: match.status,
+                    utcDate: match.utcDate,
+                    date: match.date,
                     ai: { ...prediction, audit: auditStr },
                     processed: true
                 };
             } else {
                 predictionsCache[match.id] = { 
-                    ...match, 
+                    id: match.id,
+                    homeTeam: match.homeTeam,
+                    awayTeam: match.awayTeam,
+                    homeId: match.homeId,
+                    awayId: match.awayId,
+                    league: match.league,
+                    status: match.status,
+                    utcDate: match.utcDate,
+                    date: match.date,
                     ai: { score: "N/A", confidence: 0, verdict: "Failed", logic: "API error", failed: true },
                     processed: true
                 };
@@ -176,7 +192,15 @@ async function processBatch(matches, startIndex) {
         } catch (err) {
             console.error(`   ❌ Failed: ${err.message}`);
             predictionsCache[match.id] = { 
-                ...match, 
+                id: match.id,
+                homeTeam: match.homeTeam,
+                awayTeam: match.awayTeam,
+                homeId: match.homeId,
+                awayId: match.awayId,
+                league: match.league,
+                status: match.status,
+                utcDate: match.utcDate,
+                date: match.date,
                 ai: { score: "N/A", confidence: 0, verdict: "Error", logic: err.message, failed: true },
                 processed: true
             };
