@@ -19,7 +19,7 @@ console.log('RAPIDAPI_KEY:', process.env.RAPIDAPI_KEY ? '✓ Set' : '✗ Missing
 console.log('==========================');
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY);
-const leadAnalyst = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const leadAnalyst = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 /**
