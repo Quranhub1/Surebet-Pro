@@ -217,7 +217,7 @@ async function processBatch(matches, startIndex) {
     }
 }
 
-// Helper: format date for API
+// Helper: format date for API (YYYY-MM-DD)
 const formatDate = (d) => d.toISOString().split('T')[0];
 
 // Start processing endpoint
@@ -230,22 +230,16 @@ app.post('/api/start-predictions', async (req, res) => {
         const allMatches = [];
         const today = new Date();
         
-        // Fetch matches from multiple date ranges to get 200+
-        const dateRanges = [
-            { date: today, days: 1 },
-            { date: new Date(today.getTime() + 1*24*60*60*1000), days: 3 },
-            { date: new Date(today.getTime() + 2*24*60*60*1000), days: 3 },
-            { date: new Date(today.getTime() + 3*24*60*60*1000), days: 3 },
-            { date: new Date(today.getTime() + 4*24*60*60*1000), days: 3 },
-        ];
+        // Fetch matches from 5 date ranges (today + 4 days ahead)
+        console.log('Fetching matches from multiple days...');
         
-        console.log('Fetching matches from multiple date ranges...');
-        
-        for (const range of dateRanges) {
+        for (let i = 0; i < 5; i++) {
+            const targetDate = new Date(today.getTime() + i*24*60*60*1000);
+            const dateStr = formatDate(targetDate);
+            
             try {
-                const dateStr = formatDate(range.date);
                 const response = await axios.get(
-                    `https://api.football-data.org/v4/matches?dateFrom=${dateStr}&dateTo=${dateStr}`,
+                    `https://api.football-data.org/v4/matches?date=${dateStr}`,
                     { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
                 );
                 
@@ -264,7 +258,7 @@ app.post('/api/start-predictions', async (req, res) => {
                 allMatches.push(...matches);
                 console.log(`   ${dateStr}: ${matches.length} matches`);
             } catch (e) {
-                console.log(`   Failed to fetch ${formatDate(range.date)}: ${e.message.substring(0,50)}`);
+                console.log(`   ${dateStr}: API error - ${e.message.substring(0,30)}`);
             }
         }
         
@@ -280,6 +274,10 @@ app.post('/api/start-predictions', async (req, res) => {
         
         const matches = uniqueMatches.slice(0, 200);
         console.log(`\nTotal unique matches: ${matches.length}`);
+        
+        if (matches.length === 0) {
+            return res.json({ error: 'No matches found. API may have rate limits.' });
+        }
         
         predictionsCache = {};
         processingStatus = { total: matches.length, processed: 0, isProcessing: true };
