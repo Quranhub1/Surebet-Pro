@@ -80,7 +80,7 @@
                 <div className="flex flex-col md:flex-row min-h-screen relative">
                     
                     {/* MOBILE TOP BAR - Hamburger on right */}
-                    <div className="md:hidden glass fixed top-0 w-full z-50 px-4 py-3 flex justify-between items-center">
+                    <div className="glass fixed top-0 w-full z-50 px-4 py-3 flex justify-between items-center">
                         <h1 className="brand font-black text-lg tracking-tighter">JOESBET <span className="text-blue-500">AI</span></h1>
                         <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-white p-2">
                             <i className={`fas ${sidebarOpen ? 'fa-times' : 'fa-ellipsis'} text-xl`}></i>
@@ -88,8 +88,8 @@
                     </div>
 
                     {/* SIDE NAVIGATION - Hidden on mobile, slides from left */}
-                    <div className={`fixed inset-y-0 left-0 w-72 glass border-r border-gray-800 z-40 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-300 ease-in-out`}>
-                        <div className="p-8 pt-16 md:pt-10">
+                    <div className={`fixed inset-y-0 left-0 w-72 glass border-r border-gray-800 z-40 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out`}>
+                        <div className="p-8 pt-20 md:pt-20">
                             <h1 className="brand font-black text-2xl leading-none tracking-tighter mb-2 italic">JOESBET</h1>
                             <h2 className="text-blue-500 font-bold text-xs uppercase tracking-[0.3em]">Predictor v1.3</h2>
                         </div>
@@ -113,7 +113,7 @@
                     </div>
 
                     {/* CONTENT CONTAINER */}
-                    <main className="flex-1 p-4 md:p-16 pt-20 md:pt-16 max-w-7xl mx-auto w-full">
+                    <main className="flex-1 p-4 md:p-16 pt-20 md:pt-20 max-w-7xl mx-auto w-full">
                         
                         <div className="mb-8 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-gray-900 pb-6 text-center md:text-left">
                             <div>
