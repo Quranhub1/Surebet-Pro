@@ -167,9 +167,8 @@ app.post('/api/predict-batch', async (req, res) => {
 
             finalBatch.push({ id: match.id, ...prediction, audit: auditStr });
 
-            // 3-second pause for rate limits
-            console.log(`   💤 Sleeping 3s...`);
-            await new Promise(r => setTimeout(r, 3000)); 
+            // Reduced delay - only 1 second between predictions
+            await new Promise(r => setTimeout(r, 1000)); 
 
         } catch (err) {
             console.error(`   ❌ Failed: ${err.message}`);

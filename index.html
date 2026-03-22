@@ -43,8 +43,8 @@
                         return;
                     }
                     const json = await res.json();
-                    // Get up to 100 matches
-                    const topGames = (json.matches || []).slice(0, 100);
+                    // Get up to 15 matches for faster processing
+                    const topGames = (json.matches || []).slice(0, 15);
                     
                     const payload = topGames.map(m => ({
                         id: m.id, homeTeam: m.homeTeam.name, awayTeam: m.awayTeam.name,
