@@ -229,40 +229,147 @@ app.post('/api/start-predictions', async (req, res) => {
     try {
         const allMatches = [];
         const today = new Date();
+        const dateStr = formatDate(today);
         
-        // Fetch matches from 14 days to get closer to 200
-        console.log('Fetching matches from 14 days...');
-        
-        for (let i = 0; i < 14; i++) {
-            const targetDate = new Date(today.getTime() + i*24*60*60*1000);
-            const dateStr = formatDate(targetDate);
+        // Use API-Football (RapidAPI) for worldwide coverage
+        if (process.env.RAPIDAPI_KEY) {
+            console.log('Fetching with API-Football (RapidAPI)...');
             
-            try {
-                const response = await axios.get(
-                    `https://api.football-data.org/v4/matches?date=${dateStr}`,
-                    { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
-                );
+            // Top leagues IDs for worldwide coverage
+            const leagueIds = [
+                2,    // UEFA Champions League
+                3,    // UEFA Europa League
+                1,    // UEFA Super Cup
+                31,   // Premier League (England)
+                39,   // Premier League (Russia)
+                140,  // La Liga (Spain)
+                135,  // Serie A (Italy)
+                78,   // Bundesliga (Germany)
+                61,   // Ligue 1 (France)
+                88,   // Eredivisie (Netherlands)
+                23,   // UEFA Nations League
+                45,   // FIFA World Cup
+                36,   // Copa del Rey
+                43,   // League Cup (England)
+                48,   // Serie B (Italy)
+                50,   // Ligue 2
+                52,   // 2. Bundesliga
+                32,   // Championship
+                33,   // League One
+                34,   // League Two
+                41,   // Scottish Premiership
+                40,   // Scottish Championship
+                73,   // Portuguese Primeira Liga
+                94,   // Belgian Pro League
+                157,  // MLS (USA)
+                131,  // Argentine Liga
+                132,  // Brazilian Serie A
+                103,  // Saudi Pro League
+                99,   // Turkish Super Lig
+                144,  // Austrian Bundesliga
+                189,  // Swiss Super League
+                222,  // Greek Super League
+                218,  // Czech Liga
+                207,  // Danish Super Liga
+                179,  // Norwegian Eliteserien
+                176,  // Swedish Allsvenskan
+                55,   // Romanian Liga I
+                263,  // Australian A-League
+                98,   // Japanese J1 League
+                292,  // Korean K League
+                382,  // Indian Super League
+                293,  // Chinese Super League
+                254,  // MLS Next Pro
+                285,  // CONCACAF Champions Cup
+                15,   // FIFA Club World Cup
+                16,   // UEFA Champions League Women
+                4,    // FIFA U-20 World Cup
+                5,    // FIFA U-17 World Cup
+                27,   // Copa America
+                6,    // UEFA Euro Qualifier
+            ];
+            
+            // Fetch from multiple leagues for today + next 3 days
+            for (let dayOffset = 0; dayOffset < 4; dayOffset++) {
+                const targetDate = new Date(today.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+                const fromDate = formatDate(targetDate);
+                const toDate = fromDate;
                 
-                const matches = (response.data.matches || []).map(m => ({
-                    id: m.id,
-                    homeTeam: m.homeTeam.name,
-                    awayTeam: m.awayTeam.name,
-                    homeId: m.homeTeam.id,
-                    awayId: m.awayTeam.id,
-                    league: m.competition.name,
-                    status: m.status,
-                    utcDate: m.utcDate,
-                    date: new Date(m.utcDate).toLocaleString()
-                }));
-                
-                allMatches.push(...matches);
-                console.log(`   Day ${i+1} (${dateStr}): ${matches.length} matches`);
-            } catch (e) {
-                console.log(`   Day ${i+1}: API error`);
+                for (const leagueId of leagueIds.slice(0, 30)) { // Limit to avoid rate limits
+                    try {
+                        const response = await axios.get(
+                            `https://api-football-v1.p.rapidapi.com/v3/fixtures`,
+                            {
+                                params: {
+                                    league: leagueId,
+                                    season: 2024,
+                                    from: fromDate,
+                                    to: toDate
+                                },
+                                headers: {
+                                    'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+                                    'x-rapidapi-host': 'api-football-v1.p.rapidapi.com'
+                                }
+                            }
+                        );
+                        
+                        const fixtures = response.data.response || [];
+                        const matches = fixtures.map(m => ({
+                            id: m.fixture.id,
+                            homeTeam: m.teams.home.name,
+                            awayTeam: m.teams.away.name,
+                            homeId: m.teams.home.id,
+                            awayId: m.teams.away.id,
+                            league: m.league.name,
+                            status: m.fixture.status.short,
+                            utcDate: m.fixture.date,
+                            date: new Date(m.fixture.date).toLocaleString(),
+                            score: m.goals.home !== null ? `${m.goals.home}-${m.goals.away}` : null
+                        }));
+                        
+                        allMatches.push(...matches);
+                        console.log(`   League ${leagueId} (${fromDate}): ${matches.length} matches`);
+                    } catch (e) {
+                        // Silently continue on rate limits
+                    }
+                    
+                    await new Promise(r => setTimeout(r, 200));
+                }
             }
+        } else {
+            // Fallback to Football Data API
+            console.log('Fetching with Football Data API...');
             
-            // Small delay to avoid rate limits
-            await new Promise(r => setTimeout(r, 500));
+            for (let i = 0; i < 14; i++) {
+                const targetDate = new Date(today.getTime() + i*24*60*60*1000);
+                const dateStr = formatDate(targetDate);
+                
+                try {
+                    const response = await axios.get(
+                        `https://api.football-data.org/v4/matches?date=${dateStr}`,
+                        { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                    );
+                    
+                    const matches = (response.data.matches || []).map(m => ({
+                        id: m.id,
+                        homeTeam: m.homeTeam.name,
+                        awayTeam: m.awayTeam.name,
+                        homeId: m.homeTeam.id,
+                        awayId: m.awayTeam.id,
+                        league: m.competition.name,
+                        status: m.status,
+                        utcDate: m.utcDate,
+                        date: new Date(m.utcDate).toLocaleString()
+                    }));
+                    
+                    allMatches.push(...matches);
+                    console.log(`   Day ${i+1} (${dateStr}): ${matches.length} matches`);
+                } catch (e) {
+                    console.log(`   Day ${i+1}: API error`);
+                }
+                
+                await new Promise(r => setTimeout(r, 500));
+            }
         }
         
         // Remove duplicates by ID
@@ -279,7 +386,7 @@ app.post('/api/start-predictions', async (req, res) => {
         console.log(`\nTotal unique matches: ${matches.length}`);
         
         if (matches.length === 0) {
-            return res.json({ error: 'No matches found. API may have rate limits.' });
+            return res.json({ error: 'No matches found. Add RAPIDAPI_KEY for more matches.' });
         }
         
         predictionsCache = {};
