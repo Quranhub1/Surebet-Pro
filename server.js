@@ -231,6 +231,10 @@ app.post('/api/start-predictions', async (req, res) => {
         const today = new Date();
         const dateStr = formatDate(today);
         
+        console.log('=== Starting prediction fetch ===');
+        console.log('RAPIDAPI_KEY set:', !!process.env.RAPIDAPI_KEY);
+        console.log('FOOTBALL_DATA_API_KEY set:', !!process.env.FOOTBALL_DATA_API_KEY);
+        
         // Use API-Football (RapidAPI) for worldwide coverage
         if (process.env.RAPIDAPI_KEY) {
             console.log('Fetching with API-Football (RapidAPI)...');
