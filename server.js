@@ -306,44 +306,45 @@ app.post('/api/start-predictions', async (req, res) => {
         console.log('RAPIDAPI_KEY:', !!process.env.RAPIDAPI_KEY);
         console.log('FOOTBALL_DATA_API_KEY:', !!process.env.FOOTBALL_DATA_API_KEY);
         
-        // PRIMARY: Free Live Football API (RapidAPI) - more matches worldwide
+        // PRIMARY: Free Livescore API (RapidAPI) - more matches worldwide
         if (process.env.RAPIDAPI_KEY) {
-            console.log('Using Free Live Football API (PRIMARY)...');
+            console.log('Using Free Livescore API (PRIMARY)...');
             
-            // Fetch matches for next 7 days
-            for (let i = 0; i < 7; i++) {
-                const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
-                try {
-                    const response = await axios.get(
-                        `https://free-api-live-football-data.p.rapidapi.com/football-getAllMatchesByDate`,
-                        {
-                            params: { date: dateStr },
-                            headers: { 
-                                'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
-                                'x-rapidapi-host': 'free-api-live-football-data.p.rapidapi.com' 
-                            }
+            try {
+                const response = await axios.get(
+                    'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
+                    {
+                        params: { keyword: 'football' },
+                        headers: { 
+                            'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
+                            'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com',
+                            'Content-Type': 'application/json'
                         }
-                    );
-                    
-                    const fixtures = response.data.response || [];
-                    const newMatches = fixtures.map(m => ({
-                        id: m.fixture?.id || Math.random(),
-                        homeTeam: m.homeTeam?.name || 'Unknown',
-                        awayTeam: m.awayTeam?.name || 'Unknown',
-                        homeId: m.homeTeam?.id || 0,
-                        awayId: m.awayTeam?.id || 0,
-                        league: m.league?.name || 'Unknown',
-                        status: m.fixture?.status?.short || 'SCHEDULED',
-                        utcDate: m.fixture?.date || today.toISOString(),
-                        date: new Date().toLocaleString()
-                    }));
-                    
-                    allMatches.push(...newMatches);
-                    console.log(`${dateStr}: ${newMatches.length} matches`);
-                } catch (e) {
-                    console.log(`${dateStr}: Error - ${e.response?.status}`);
+                    }
+                );
+                
+                const data = response.data.response || [];
+                console.log(`Livescore API returned: ${data.length} items`);
+                
+                // Parse the response - structure depends on API
+                for (const item of data) {
+                    if (item.homeTeam && item.awayTeam) {
+                        allMatches.push({
+                            id: item.id || Math.random(),
+                            homeTeam: item.homeTeam.name || item.homeTeam || 'Unknown',
+                            awayTeam: item.awayTeam.name || item.awayTeam || 'Unknown',
+                            homeId: item.homeTeam.id || 0,
+                            awayId: item.awayTeam.id || 0,
+                            league: item.league?.name || item.league || 'Unknown',
+                            status: item.status?.short || item.status || 'SCHEDULED',
+                            utcDate: item.date || today.toISOString(),
+                            date: new Date().toLocaleString()
+                        });
+                    }
                 }
-                await new Promise(r => setTimeout(r, 1000));
+                console.log(`Parsed ${allMatches.length} matches from Livescore`);
+            } catch (e) {
+                console.log(`Livescore API Error: ${e.response?.status || e.message}`);
             }
         }
         
