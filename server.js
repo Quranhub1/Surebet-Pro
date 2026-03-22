@@ -61,7 +61,7 @@ async function getLiveIntel(home, away) {
 }
 
 /**
- * Get prediction with more betting markets - 3-tier fallback
+ * Get prediction with more betting markets - 4-tier fallback
  */
 async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
     const prompt = `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}.
@@ -488,5 +488,5 @@ app.get('/api/football-data/matches', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🚀 JOESBET Hub live on ${PORT}`));
