@@ -230,10 +230,10 @@ app.post('/api/start-predictions', async (req, res) => {
         const allMatches = [];
         const today = new Date();
         
-        // Fetch matches from 5 date ranges (today + 4 days ahead)
-        console.log('Fetching matches from multiple days...');
+        // Fetch matches from 14 days to get closer to 200
+        console.log('Fetching matches from 14 days...');
         
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 14; i++) {
             const targetDate = new Date(today.getTime() + i*24*60*60*1000);
             const dateStr = formatDate(targetDate);
             
@@ -256,10 +256,13 @@ app.post('/api/start-predictions', async (req, res) => {
                 }));
                 
                 allMatches.push(...matches);
-                console.log(`   ${dateStr}: ${matches.length} matches`);
+                console.log(`   Day ${i+1} (${dateStr}): ${matches.length} matches`);
             } catch (e) {
-                console.log(`   ${dateStr}: API error - ${e.message.substring(0,30)}`);
+                console.log(`   Day ${i+1}: API error`);
             }
+            
+            // Small delay to avoid rate limits
+            await new Promise(r => setTimeout(r, 500));
         }
         
         // Remove duplicates by ID
