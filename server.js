@@ -71,13 +71,27 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
     if (process.env.GOOGLE_AI_API_KEY) {
         try {
             const gemRes = await leadAnalyst.generateContent(prompt);
-            const rawJson = gemRes.response.text();
+            let rawJson = gemRes.response.text();
+            
+            // Clean response
+            rawJson = rawJson.replace(/```json/g, '').replace(/```/g, '').trim();
             const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
             
             if (jsonMatch) {
                 const prediction = JSON.parse(jsonMatch[0]);
-                console.log(`   ✅ Google Gemini: ${prediction.score}`);
-                return prediction;
+                const result = {
+                    score: prediction.score || '0-0',
+                    confidence: Math.min(100, Math.max(0, parseInt(prediction.confidence) || 50)),
+                    verdict: prediction.verdict || 'HOME',
+                    logic: prediction.logic || 'Auto prediction',
+                    doubleChance: prediction.doubleChance || '1X',
+                    overUnder: prediction.overUnder || 'Over 2.5',
+                    btts: prediction.btts || 'Yes',
+                    handicap: prediction.handicap || '0',
+                    isValueBet: Boolean(prediction.isValueBet)
+                };
+                console.log(`   ✅ Google Gemini: ${result.score}`);
+                return result;
             }
         } catch (e) {
             console.log(`   ⚠️ Google Gemini failed: ${e.message.substring(0,30)}`);
@@ -93,23 +107,35 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
                 {
                     model: 'deepseek-chat',
                     messages: [
-                        { role: 'system', content: 'Football expert predictor. Return JSON only.' },
-                        { role: 'user', content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. News: ${news}. Provide prediction JSON.` }
+                        { role: 'system', content: 'Football expert. Always respond with valid JSON only.' },
+                        { role: 'user', content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Predict score, confidence, verdict (HOME/DRAW/AWAY), logic, doubleChance, overUnder, btts, handicap, isValueBet. JSON only.` }
                     ],
-                    temperature: 0.7
+                    temperature: 0.3
                 },
                 {
                     headers: { 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` }
                 }
             );
             
-            const content = deepseekRes.data.choices[0].message.content;
+            let content = deepseekRes.data.choices[0].message.content;
+            content = content.replace(/```json/g, '').replace(/```/g, '').trim();
             const jsonMatch = content.match(/\{[\s\S]*\}/);
             
             if (jsonMatch) {
                 const prediction = JSON.parse(jsonMatch[0]);
-                console.log(`   ✅ DeepSeek: ${prediction.score}`);
-                return prediction;
+                const result = {
+                    score: prediction.score || '0-0',
+                    confidence: Math.min(100, Math.max(0, parseInt(prediction.confidence) || 50)),
+                    verdict: prediction.verdict || 'HOME',
+                    logic: prediction.logic || 'Auto prediction',
+                    doubleChance: prediction.doubleChance || '1X',
+                    overUnder: prediction.overUnder || 'Over 2.5',
+                    btts: prediction.btts || 'Yes',
+                    handicap: prediction.handicap || '0',
+                    isValueBet: Boolean(prediction.isValueBet)
+                };
+                console.log(`   ✅ DeepSeek: ${result.score}`);
+                return result;
             }
         } catch (e) {
             console.log(`   ⚠️ DeepSeek failed: ${e.message.substring(0,30)}`);
@@ -122,23 +148,42 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
             console.log(`   🔄 Trying Groq (final fallback)...`);
             const groqRes = await groq.chat.completions.create({
                 messages: [
-                    { role: "system", content: "Football expert predictor. Return JSON with score, confidence, verdict, logic, doubleChance, overUnder, btts, handicap, isValueBet." },
-                    { role: "user", content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. News: ${news}. Provide prediction JSON.` }
+                    { role: "system", content: "You are a football prediction expert. ALWAYS respond with valid JSON only. No markdown, no explanation." },
+                    { role: "user", content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. News: ${news}. Predict: score (like 2-1), confidence (0-100), verdict (HOME/DRAW/AWAY), logic (short reason), doubleChance (1X/X2/12), overUnder (Over 2.5/Under 2.5), btts (Yes/No), handicap (0/+1/-1), isValueBet (true/false). Return JSON only.` }
                 ],
                 model: "llama-3.1-8b-instant",
-                temperature: 0.7
+                temperature: 0.3
             });
             
-            const content = groqRes.choices[0].message.content;
+            let content = groqRes.choices[0].message.content;
+            
+            // Clean the response - remove markdown code blocks
+            content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            
+            // Find JSON in response
             const jsonMatch = content.match(/\{[\s\S]*\}/);
             
             if (jsonMatch) {
                 const prediction = JSON.parse(jsonMatch[0]);
-                console.log(`   ✅ Groq: ${prediction.score}`);
-                return prediction;
+                // Ensure all required fields
+                const result = {
+                    score: prediction.score || '0-0',
+                    confidence: Math.min(100, Math.max(0, parseInt(prediction.confidence) || 50)),
+                    verdict: prediction.verdict || 'HOME',
+                    logic: prediction.logic || 'Auto prediction',
+                    doubleChance: prediction.doubleChance || '1X',
+                    overUnder: prediction.overUnder || 'Over 2.5',
+                    btts: prediction.btts || 'Yes',
+                    handicap: prediction.handicap || '0',
+                    isValueBet: Boolean(prediction.isValueBet)
+                };
+                console.log(`   ✅ Groq: ${result.score}`);
+                return result;
+            } else {
+                console.log(`   ⚠️ Groq: No JSON found in response`);
             }
         } catch (e) {
-            console.log(`   ❌ Groq also failed: ${e.message}`);
+            console.log(`   ❌ Groq failed: ${e.message}`);
         }
     }
     
