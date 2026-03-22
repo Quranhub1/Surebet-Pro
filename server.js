@@ -59,46 +59,71 @@ async function getLiveIntel(home, away) {
 }
 
 /**
- * Get prediction with more betting markets
+ * Get prediction with more betting markets - 3-tier fallback
  */
 async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
-    // Try Google AI first
+    const prompt = `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}.
+    Provide prediction JSON:
+    {"score":"X-Y","confidence":0-100,"verdict":"Pick","logic":"10 words",
+    "doubleChance":"1X/X2/12","overUnder":"Over 2.5/Under 2.5","btts":"Yes/No","handicap":"0/+1/-1","isValueBet":bool}`;
+    
+    // 1. Try Google Gemini AI
     if (process.env.GOOGLE_AI_API_KEY) {
         try {
-            const prompt = `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}.
-            Provide comprehensive prediction JSON:
-            {"score":"X-Y","confidence":0-100,"verdict":"Pick","logic":"10 words",
-            "doubleChance":"1X, X2, or 12",
-            "overUnder":"Over 2.5 or Under 2.5",
-            "btts":"Yes or No",
-            "handicap":"Home -1, Away +1, or 0",
-            "isValueBet":bool}`;
-            
             const gemRes = await leadAnalyst.generateContent(prompt);
             const rawJson = gemRes.response.text();
             const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
             
             if (jsonMatch) {
                 const prediction = JSON.parse(jsonMatch[0]);
-                console.log(`   ✅ Google AI: ${prediction.score}`);
+                console.log(`   ✅ Google Gemini: ${prediction.score}`);
                 return prediction;
             }
-        } catch (googleErr) {
-            console.log(`   ⚠️ Google AI failed: ${googleErr.message.substring(0, 50)}`);
-            if (googleErr.message.includes('429') || googleErr.message.includes('quota')) {
-                console.log(`   🔄 Quota exceeded, switching to Groq...`);
-            }
+        } catch (e) {
+            console.log(`   ⚠️ Google Gemini failed: ${e.message.substring(0,30)}`);
         }
     }
     
-    // Fallback to Groq
+    // 2. Try DeepSeek
+    if (process.env.DEEPSEEK_API_KEY) {
+        try {
+            console.log(`   🔄 Trying DeepSeek...`);
+            const deepseekRes = await axios.post(
+                'https://api.deepseek.com/v1/chat/completions',
+                {
+                    model: 'deepseek-chat',
+                    messages: [
+                        { role: 'system', content: 'Football expert predictor. Return JSON only.' },
+                        { role: 'user', content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. News: ${news}. Provide prediction JSON.` }
+                    ],
+                    temperature: 0.7
+                },
+                {
+                    headers: { 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` }
+                }
+            );
+            
+            const content = deepseekRes.data.choices[0].message.content;
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            
+            if (jsonMatch) {
+                const prediction = JSON.parse(jsonMatch[0]);
+                console.log(`   ✅ DeepSeek: ${prediction.score}`);
+                return prediction;
+            }
+        } catch (e) {
+            console.log(`   ⚠️ DeepSeek failed: ${e.message.substring(0,30)}`);
+        }
+    }
+    
+    // 3. Fallback to Groq
     if (process.env.GROQ_API_KEY) {
         try {
-            console.log(`   🔄 Using Groq fallback...`);
+            console.log(`   🔄 Trying Groq (final fallback)...`);
             const groqRes = await groq.chat.completions.create({
                 messages: [
-                    { role: "system", content: "Football expert predictor. Return JSON with score, confidence (0-100), verdict, logic (10 words), doubleChance (1X/X2/12), overUnder (Over 2.5/Under 2.5), btts (Yes/No), handicap, isValueBet (bool)." },
-                    { role: "user", content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}. Provide prediction in JSON format.` }
+                    { role: "system", content: "Football expert predictor. Return JSON with score, confidence, verdict, logic, doubleChance, overUnder, btts, handicap, isValueBet." },
+                    { role: "user", content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. News: ${news}. Provide prediction JSON.` }
                 ],
                 model: "llama-3.1-8b-instant",
                 temperature: 0.7
@@ -112,8 +137,8 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
                 console.log(`   ✅ Groq: ${prediction.score}`);
                 return prediction;
             }
-        } catch (groqErr) {
-            console.log(`   ❌ Groq also failed: ${groqErr.message}`);
+        } catch (e) {
+            console.log(`   ❌ Groq also failed: ${e.message}`);
         }
     }
     
