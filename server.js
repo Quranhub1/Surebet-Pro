@@ -231,62 +231,11 @@ app.post('/api/start-predictions', async (req, res) => {
         const today = new Date();
         
         console.log('=== Fetching matches ===');
-        console.log('RAPIDAPI_KEY:', !!process.env.RAPIDAPI_KEY);
         console.log('FOOTBALL_DATA_API_KEY:', !!process.env.FOOTBALL_DATA_API_KEY);
+        console.log('RAPIDAPI_KEY:', !!process.env.RAPIDAPI_KEY);
         
-        // Try API-Football first (more comprehensive)
-        if (process.env.RAPIDAPI_KEY) {
-            console.log('Using RapidAPI...');
-            
-            // Get next 7 days from top leagues
-            const leagues = [31, 140, 135, 78, 61, 88, 157, 73, 94, 132, 99, 103, 98];
-            const dates = [];
-            for (let i = 0; i < 7; i++) {
-                dates.push(formatDate(new Date(today.getTime() + i*24*60*60*1000)));
-            }
-            
-            // Simple: fetch all fixtures from these leagues
-            for (const leagueId of leagues) {
-                try {
-                    const response = await axios.get(
-                        `https://api-football-v1.p.rapidapi.com/v3/fixtures`,
-                        {
-                            params: {
-                                league: leagueId,
-                                season: 2024,
-                                from: dates[0],
-                                to: dates[6]
-                            },
-                            headers: {
-                                'x-rapidapi-key': process.env.RAPIDAPI_KEY,
-                                'x-rapidapi-host': 'api-football-v1.p.rapidapi.com'
-                            }
-                        }
-                    );
-                    
-                    const fixtures = response.data.response || [];
-                    const newMatches = fixtures.map(m => ({
-                        id: m.fixture.id,
-                        homeTeam: m.teams.home.name,
-                        awayTeam: m.teams.away.name,
-                        homeId: m.teams.home.id,
-                        awayId: m.teams.away.id,
-                        league: m.league.name,
-                        status: m.fixture.status.short,
-                        utcDate: m.fixture.date,
-                        date: new Date(m.fixture.date).toLocaleString()
-                    }));
-                    
-                    allMatches.push(...newMatches);
-                    console.log(`League ${leagueId}: ${newMatches.length} matches`);
-                } catch (e) {
-                    console.log(`League ${leagueId} error: ${e.message.substring(0,50)}`);
-                }
-                await new Promise(r => setTimeout(r, 300));
-            }
-        } 
-        // Fallback to Football Data API
-        else if (process.env.FOOTBALL_DATA_API_KEY) {
+        // PRIMARY: Football Data API (works reliably)
+        if (process.env.FOOTBALL_DATA_API_KEY) {
             console.log('Using Football Data API...');
             
             for (let i = 0; i < 7; i++) {
@@ -312,12 +261,50 @@ app.post('/api/start-predictions', async (req, res) => {
                     allMatches.push(...newMatches);
                     console.log(`${dateStr}: ${newMatches.length} matches`);
                 } catch (e) {
-                    console.log(`${dateStr}: Error`);
+                    console.log(`${dateStr}: Error - ${e.response?.status}`);
                 }
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 1000));
             }
-        } else {
-            return res.json({ error: 'No API keys configured. Add RAPIDAPI_KEY or FOOTBALL_DATA_API_KEY' });
+        }
+        
+        // SECONDARY: Add RapidAPI matches if available (for more coverage)
+        if (process.env.RAPIDAPI_KEY && allMatches.length < 50) {
+            console.log('Adding matches from RapidAPI...');
+            
+            const leagues = [31, 140, 135, 78, 61, 88, 157, 73, 94];
+            const fromDate = formatDate(today);
+            const toDate = formatDate(new Date(today.getTime() + 3*24*60*60*1000));
+            
+            for (const leagueId of leagues.slice(0, 5)) {
+                try {
+                    const response = await axios.get(
+                        `https://api-football-v1.p.rapidapi.com/v3/fixtures`,
+                        {
+                            params: { league: leagueId, season: 2024, from: fromDate, to: toDate },
+                            headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'api-football-v1.p.rapidapi.com' }
+                        }
+                    );
+                    
+                    const fixtures = response.data.response || [];
+                    const newMatches = fixtures.map(m => ({
+                        id: m.fixture.id,
+                        homeTeam: m.teams.home.name,
+                        awayTeam: m.teams.away.name,
+                        homeId: m.teams.home.id,
+                        awayId: m.teams.away.id,
+                        league: m.league.name,
+                        status: m.fixture.status.short,
+                        utcDate: m.fixture.date,
+                        date: new Date(m.fixture.date).toLocaleString()
+                    }));
+                    
+                    allMatches.push(...newMatches);
+                    console.log(`RapidAPI League ${leagueId}: ${newMatches.length} matches`);
+                } catch (e) {
+                    console.log(`RapidAPI League ${leagueId}: ${e.response?.status}`);
+                }
+                await new Promise(r => setTimeout(r, 1000));
+            }
         }
         
         // Remove duplicates
@@ -331,7 +318,7 @@ app.post('/api/start-predictions', async (req, res) => {
         }
         
         const matches = unique.slice(0, 200);
-        console.log(`Total: ${matches.length} matches`);
+        console.log(`Total unique: ${matches.length} matches`);
         
         if (matches.length === 0) {
             return res.json({ error: 'No matches found. Check API keys.' });
