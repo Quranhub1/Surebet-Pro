@@ -50,8 +50,12 @@ app.post('/api/predict-batch', async (req, res) => {
     const { matches } = req.body;
     
     // Input validation
-    if (!Array.isArray(matches) || matches.length === 0) {
-        return res.status(400).json({ error: 'Invalid or empty matches array' });
+    if (!matches || !Array.isArray(matches)) {
+        return res.status(400).json({ error: 'Invalid matches data' });
+    }
+    
+    if (matches.length === 0) {
+        return res.json([]); // Return empty array if no matches
     }
     
     const finalBatch = [];
@@ -118,12 +122,18 @@ app.post('/api/predict-batch', async (req, res) => {
 
 // Football Proxy
 app.get('/api/football-data/matches', async (req, res) => {
+    if (!process.env.FOOTBALL_DATA_API_KEY) {
+        return res.status(500).json({ error: 'FOOTBALL_DATA_API_KEY not configured. Add it in Railway/Render dashboard.' });
+    }
     try {
-        const response = await axios.get('https://api-football-data.org/v4/matches', { 
+        const response = await axios.get('https://api.football-data.org/v4/matches', { 
             headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } 
         });
         res.json(response.data);
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        console.error('Football API Error:', e.message);
+        res.status(500).json({ error: 'Failed to fetch matches. Check API key.' }); 
+    }
 });
 
 const PORT = process.env.PORT || 3000;
