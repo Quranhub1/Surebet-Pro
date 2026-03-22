@@ -15,6 +15,7 @@ console.log('FOOTBALL_DATA_API_KEY:', process.env.FOOTBALL_DATA_API_KEY ? '✓ S
 console.log('GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('DEEPSEEK_API_KEY:', process.env.DEEPSEEK_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('Z_AI_API_KEY:', process.env.Z_AI_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('RAPIDAPI_KEY:', process.env.RAPIDAPI_KEY ? '✓ Set' : '✗ Missing');
 console.log('==========================');
 
@@ -141,6 +142,50 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
             }
         } catch (e) {
             console.log(`   ⚠️ DeepSeek failed: ${e.response?.status || e.message.substring(0,40)}`);
+        }
+    }
+    
+    // 3. Try Z.ai
+    if (process.env.Z_AI_API_KEY) {
+        try {
+            console.log(`   🔄 Trying Z.ai...`);
+            const zRes = await axios.post(
+                'https://api.z.ai/v1/chat/completions',
+                {
+                    model: 'default',
+                    messages: [
+                        { role: 'system', content: 'Football expert. Always respond with valid JSON only.' },
+                        { role: 'user', content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Predict score, confidence, verdict (HOME/DRAW/AWAY), logic, doubleChance, overUnder, btts, handicap, isValueBet. JSON only.` }
+                    ],
+                    temperature: 0.3
+                },
+                {
+                    headers: { 'Authorization': `Bearer ${process.env.Z_AI_API_KEY}` }
+                }
+            );
+            
+            let content = zRes.data.choices[0].message.content;
+            content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            
+            if (jsonMatch) {
+                const prediction = JSON.parse(jsonMatch[0]);
+                const result = {
+                    score: prediction.score || '0-0',
+                    confidence: Math.min(100, Math.max(0, parseInt(prediction.confidence) || 50)),
+                    verdict: prediction.verdict || 'HOME',
+                    logic: prediction.logic || 'Auto prediction',
+                    doubleChance: prediction.doubleChance || '1X',
+                    overUnder: prediction.overUnder || 'Over 2.5',
+                    btts: prediction.btts || 'Yes',
+                    handicap: prediction.handicap || '0',
+                    isValueBet: Boolean(prediction.isValueBet)
+                };
+                console.log(`   ✅ Z.ai: ${result.score}`);
+                return result;
+            }
+        } catch (e) {
+            console.log(`   ⚠️ Z.ai failed: ${e.response?.status || e.message.substring(0,40)}`);
         }
     }
     
