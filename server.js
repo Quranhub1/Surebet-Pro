@@ -259,8 +259,30 @@ app.get('/api/predictions', (req, res) => {
     const failed = predictions.filter(p => p.ai?.failed);
     const successful = predictions.filter(p => !p.ai?.failed);
     
+    // Sanitize: ensure only string properties are returned
+    const sanitizePrediction = (p) => ({
+        id: p.id,
+        homeTeam: String(p.homeTeam || 'Unknown'),
+        awayTeam: String(p.awayTeam || 'Unknown'),
+        league: String(p.league || 'Unknown'),
+        status: String(p.status || 'SCHEDULED'),
+        date: String(p.date || ''),
+        ai: p.ai ? {
+            score: String(p.ai.score || 'N/A'),
+            confidence: Number(p.ai.confidence) || 0,
+            verdict: String(p.ai.verdict || '-'),
+            logic: String(p.ai.logic || ''),
+            audit: String(p.ai.audit || ''),
+            doubleChance: String(p.ai.doubleChance || '-'),
+            overUnder: String(p.ai.overUnder || '-'),
+            btts: String(p.ai.btts || '-'),
+            handicap: String(p.ai.handicap || '-'),
+            isValueBet: Boolean(p.ai.isValueBet)
+        } : null
+    });
+    
     res.json({ 
-        predictions: successful,
+        predictions: successful.map(sanitizePrediction),
         failedCount: failed.length,
         total: processingStatus.total,
         processed: processingStatus.processed,
@@ -280,7 +302,16 @@ app.post('/api/predict-batch', async (req, res) => {
         if (predictionsCache[match.id]) {
             results.push(predictionsCache[match.id]);
         } else {
-            results.push({ ...match, ai: { score: "Pending", confidence: 0, verdict: "Processing" }});
+            // Only use explicitly extracted string properties, not the full object
+            results.push({ 
+                id: match.id,
+                homeTeam: typeof match.homeTeam === 'string' ? match.homeTeam : (match.homeTeam?.name || 'Unknown'),
+                awayTeam: typeof match.awayTeam === 'string' ? match.awayTeam : (match.awayTeam?.name || 'Unknown'),
+                league: match.competition?.name || match.league || 'Unknown',
+                status: match.status || 'SCHEDULED',
+                date: match.date || new Date(match.utcDate).toLocaleString(),
+                ai: { score: "Pending", confidence: 0, verdict: "Processing" }
+            });
         }
     }
     res.json(results);

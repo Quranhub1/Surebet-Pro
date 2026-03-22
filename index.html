@@ -11,13 +11,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;700;900&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <style>
-        body { font-family: 'Inter', sans-serif; background-color: #030712; color: #f3f4f6; }
-        .brand { font-family: 'Lexend', sans-serif; }
-        .glass { background: rgba(17, 24, 39, 0.8); backdrop-filter: blur(10px); }
-    </style>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
 </head>
-<body>
+<body class="transition-colors duration-300">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -27,6 +27,20 @@
             const [matches, setMatches] = useState([]);
             const [loading, setLoading] = useState(false);
             const [progress, setProgress] = useState({ total: 0, processed: 0, isProcessing: false });
+            const [darkMode, setDarkMode] = useState(true);
+            const [expandedRow, setExpandedRow] = useState(null);
+
+            useEffect(() => {
+                if (darkMode) {
+                    document.documentElement.classList.add('dark');
+                    document.body.classList.add('bg-gray-900', 'text-gray-100');
+                    document.body.classList.remove('bg-gray-100', 'text-gray-900');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    document.body.classList.remove('bg-gray-900', 'text-gray-100');
+                    document.body.classList.add('bg-gray-100', 'text-gray-900');
+                }
+            }, [darkMode]);
 
             const loadPredictions = async () => {
                 try {
@@ -45,34 +59,39 @@
                 setLoading(false);
             };
 
-            // Poll for updates
             useEffect(() => {
                 const interval = setInterval(loadPredictions, 3000);
                 return () => clearInterval(interval);
             }, []);
 
-            // Get status badge
             const getStatusBadge = (status) => {
                 const styles = {
-                    'SCHEDULED': 'bg-gray-700 text-gray-300',
+                    'SCHEDULED': 'bg-gray-500 text-white',
                     'IN_PLAY': 'bg-green-600 text-white animate-pulse',
-                    'PAUSED': 'bg-yellow-600 text-white',
+                    'PAUSED': 'bg-yellow-500 text-white',
                     'FINISHED': 'bg-blue-600 text-white',
                     'POSTPONED': 'bg-red-600 text-white',
-                    'SUSPENDED': 'bg-orange-600 text-white'
+                    'SUSPENDED': 'bg-orange-500 text-white'
                 };
-                return styles[status] || 'bg-gray-700 text-gray-300';
+                return styles[status] || 'bg-gray-500 text-white';
+            };
+
+            const toggleRow = (id) => {
+                setExpandedRow(expandedRow === id ? null : id);
             };
 
             return (
-                <div className="min-h-screen">
+                <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'bg-gray-900' : 'bg-gray-100'}`}>
                     {/* HEADER */}
-                    <div className="glass fixed top-0 w-full z-50 px-4 py-3 flex justify-between items-center border-b border-gray-800">
-                        <h1 className="brand font-black text-lg">JOESBET <span className="text-blue-500">AI</span></h1>
+                    <div className={`fixed top-0 w-full z-50 px-4 py-3 flex justify-between items-center border-b transition-colors duration-300 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                        <h1 className="font-black text-lg">JOESBET <span className="text-blue-500">AI</span></h1>
                         <div className="flex items-center gap-4">
+                            <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600">
+                                <i className={`fas ${darkMode ? 'fa-sun' : 'fa-moon'}`}></i>
+                            </button>
                             {progress.isProcessing && (
                                 <span className="text-xs text-yellow-500">
-                                    {progress.processed}/{progress.total} processed
+                                    {progress.processed}/{progress.total}
                                 </span>
                             )}
                             <button onClick={startPrediction} disabled={loading || progress.isProcessing} 
@@ -86,7 +105,7 @@
                     <div className="pt-16 p-4">
                         {matches.length === 0 && !progress.isProcessing && (
                             <div className="text-center py-20 opacity-50">
-                                <i className="fas fa-futbol text-5xl mb-4"></i>
+                                <i className={`fas fa-futbol text-5xl mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}></i>
                                 <p className="text-xl">Press START to begin predictions</p>
                             </div>
                         )}
@@ -95,7 +114,8 @@
                             <div className="overflow-x-auto">
                                 <table className="w-full text-xs">
                                     <thead>
-                                        <tr className="border-b border-gray-700 text-gray-400 uppercase tracking-wider">
+                                        <tr className={`border-b uppercase tracking-wider ${darkMode ? 'border-gray-700 text-gray-400' : 'border-gray-300 text-gray-500'}`}>
+                                            <th className="py-2 px-2 text-left"></th>
                                             <th className="py-2 px-2 text-left">Time</th>
                                             <th className="py-2 px-2 text-left">League</th>
                                             <th className="py-2 px-2 text-left">Home</th>
@@ -110,31 +130,60 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {matches.filter(m => m.homeTeam && m.awayTeam && typeof m.homeTeam === 'string').map(m => (
-                                            <tr key={m.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                                                <td className="py-2 px-2">
-                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusBadge(m.status)}`}>
-                                                        {m.status}
-                                                    </span>
-                                                    <div className="text-gray-500 mt-1 text-[10px]">{m.date}</div>
-                                                </td>
-                                                <td className="py-2 px-2 text-blue-400 font-bold">{m.league}</td>
-                                                <td className="py-2 px-2 font-medium">{m.homeTeam}</td>
-                                                <td className="py-2 px-2 font-medium">{m.awayTeam}</td>
-                                                <td className="py-2 px-2 text-center font-black text-blue-400">{m.ai?.score}</td>
-                                                <td className="py-2 px-2 text-center">
-                                                    <span className={`font-bold ${(m.ai?.confidence || 0) > 75 ? 'text-green-400' : 'text-blue-400'}`}>
-                                                        {m.ai?.confidence || 0}%
-                                                    </span>
-                                                </td>
-                                                <td className="py-2 px-2 text-center">{m.ai?.doubleChance || '-'}</td>
-                                                <td className="py-2 px-2 text-center">{m.ai?.overUnder || '-'}</td>
-                                                <td className="py-2 px-2 text-center">{m.ai?.btts || '-'}</td>
-                                                <td className="py-2 px-2 text-center">{m.ai?.handicap || '-'}</td>
-                                                <td className="py-2 px-2 text-center">
-                                                    <span className="bg-blue-600 px-2 py-1 rounded font-bold">{m.ai?.verdict || '-'}</span>
-                                                </td>
-                                            </tr>
+                                        {matches.map(m => (
+                                            <React.Fragment key={m.id}>
+                                                <tr className={`border-b hover:bg-opacity-50 cursor-pointer transition-colors ${darkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-200 hover:bg-gray-200'}`} onClick={() => toggleRow(m.id)}>
+                                                    <td className="py-2 px-2">
+                                                        <i className={`fas fa-chevron-${expandedRow === m.id ? 'up' : 'down'} text-gray-400`}></i>
+                                                    </td>
+                                                    <td className="py-2 px-2">
+                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusBadge(m.status)}`}>
+                                                            {m.status}
+                                                        </span>
+                                                        <div className={`mt-1 text-[10px] ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>{m.date}</div>
+                                                    </td>
+                                                    <td className={`py-2 px-2 font-bold ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>{m.league}</td>
+                                                    <td className="py-2 px-2 font-medium">{m.homeTeam}</td>
+                                                    <td className="py-2 px-2 font-medium">{m.awayTeam}</td>
+                                                    <td className="py-2 px-2 text-center font-black text-blue-400">{m.ai?.score}</td>
+                                                    <td className="py-2 px-2 text-center">
+                                                        <span className={`font-bold ${(m.ai?.confidence || 0) > 75 ? 'text-green-500' : 'text-blue-400'}`}>
+                                                            {m.ai?.confidence || 0}%
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2 px-2 text-center">{m.ai?.doubleChance || '-'}</td>
+                                                    <td className="py-2 px-2 text-center">{m.ai?.overUnder || '-'}</td>
+                                                    <td className="py-2 px-2 text-center">{m.ai?.btts || '-'}</td>
+                                                    <td className="py-2 px-2 text-center">{m.ai?.handicap || '-'}</td>
+                                                    <td className="py-2 px-2 text-center">
+                                                        <span className="bg-blue-600 px-2 py-1 rounded font-bold text-white">{m.ai?.verdict || '-'}</span>
+                                                    </td>
+                                                </tr>
+                                                {expandedRow === m.id && (
+                                                    <tr className={darkMode ? 'bg-gray-800' : 'bg-gray-200'}>
+                                                        <td colSpan="12" className="p-4">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <h4 className="font-bold text-sm mb-2">Prediction Logic</h4>
+                                                                    <p className="text-sm opacity-80">{m.ai?.logic || 'No logic provided'}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <h4 className="font-bold text-sm mb-2">AI Audit</h4>
+                                                                    <p className="text-sm opacity-80">{m.ai?.audit || 'No audit available'}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <h4 className="font-bold text-sm mb-2">Analysis</h4>
+                                                                    <p className="text-sm opacity-80">Home: {m.homeTeam} | Away: {m.awayTeam}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <h4 className="font-bold text-sm mb-2">Market Value</h4>
+                                                                    <p className="text-sm opacity-80">{m.ai?.isValueBet ? '✓ Value Bet Detected' : 'No value detected'}</p>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
                                         ))}
                                     </tbody>
                                 </table>
@@ -142,9 +191,8 @@
                         )}
 
                         {progress.processed > 0 && (
-                            <div className="text-center py-4 text-gray-500 text-sm">
-                                Showing {matches.length} successful predictions
-                                {progress.failedCount > 0 && ` (${progress.failedCount} failed, filtered out)`}
+                            <div className={`text-center py-4 ${darkMode ? 'text-gray-500' : 'text-gray-400'} text-sm`}>
+                                Showing {matches.length} predictions
                             </div>
                         )}
                     </div>
