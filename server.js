@@ -9,6 +9,15 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '.')));
 
+// Log environment variables (without revealing secrets)
+console.log('=== Environment Check ===');
+console.log('FOOTBALL_DATA_API_KEY:', process.env.FOOTBALL_DATA_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('TAVILY_API_KEY:', process.env.TAVILY_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('RAPIDAPI_KEY:', process.env.RAPIDAPI_KEY ? '✓ Set' : '✗ Missing');
+console.log('==========================');
+
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY);
 const leadAnalyst = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -25,7 +34,10 @@ async function getHistory(h, a) {
         });
         const games = res.data.response || [];
         return games.length ? games.map(g => `${g.goals.home}-${g.goals.away}`).join(' | ') : "No recent data.";
-    } catch (e) { return "Data timeout."; }
+    } catch (e) { 
+        console.log('getHistory error:', e.message);
+        return "Data timeout."; 
+    }
 }
 
 /**
@@ -40,7 +52,10 @@ async function getLiveIntel(home, away) {
             max_results: 1
         });
         return res.data.results[0]?.content.substring(0, 500) || "Stable status.";
-    } catch (e) { return "News fail."; }
+    } catch (e) { 
+        console.log('getLiveIntel error:', e.message);
+        return "News fail."; 
+    }
 }
 
 /**
@@ -55,7 +70,7 @@ app.post('/api/predict-batch', async (req, res) => {
     }
     
     if (matches.length === 0) {
-        return res.json([]); // Return empty array if no matches
+        return res.json([]);
     }
     
     const finalBatch = [];
@@ -64,32 +79,44 @@ app.post('/api/predict-batch', async (req, res) => {
 
     for (const match of matches) {
         try {
-            console.log(`🤖 Processing: ${match.homeTeam} vs ${match.awayTeam}`);
+            console.log(`\n🤖 Processing: ${match.homeTeam} vs ${match.awayTeam}`);
 
-            // Parallel Data Fetch (Agents 1 & 2)
+            // Parallel Data Fetch
             const [h2h, news] = await Promise.all([
                 getHistory(match.homeId, match.awayId),
                 getLiveIntel(match.homeTeam, match.awayTeam)
             ]);
 
-            // Groq Auditor Agent (Logical check)
-            // Use llama-3.1-8b-instant because it has higher Rate Limits (RPM) than 70b
-            let auditStr = "";
-            try {
-                const groqRes = await groq.chat.completions.create({
-                    messages: [
-                        { role: "system", content: "Expert bet auditor. Find the trap. Result must be 1 sentence max." },
-                        { role: "user", content: `History: ${h2h}. News: ${news}. ${match.homeTeam} vs ${match.awayTeam}.` }
-                    ],
-                    model: "llama-3.1-8b-instant" 
-                });
-                auditStr = groqRes.choices[0].message.content;
-            } catch (groqErr) {
-                console.log("⚠️ Groq hit limit, skipping audit for this game.");
-                auditStr = "Logic verification skipped to prevent overload.";
+            console.log(`   H2H: ${h2h}`);
+            console.log(`   News: ${news.substring(0, 50)}...`);
+
+            // Groq Auditor Agent
+            let auditStr = "Logic verification skipped.";
+            if (process.env.GROQ_API_KEY) {
+                try {
+                    const groqRes = await groq.chat.completions.create({
+                        messages: [
+                            { role: "system", content: "Expert bet auditor. Find the trap. Result must be 1 sentence max." },
+                            { role: "user", content: `History: ${h2h}. News: ${news}. ${match.homeTeam} vs ${match.awayTeam}.` }
+                        ],
+                        model: "llama-3.1-8b-instant"
+                    });
+                    auditStr = groqRes.choices[0].message.content;
+                    console.log(`   Audit: ${auditStr}`);
+                } catch (groqErr) {
+                    console.log('   ⚠️ Groq error:', groqErr.message);
+                }
+            } else {
+                console.log('   ⚠️ GROQ_API_KEY not set');
             }
 
-            // Lead Analyst (Gemini synthesis)
+            // Lead Analyst (Gemini)
+            if (!process.env.GOOGLE_AI_API_KEY) {
+                console.log('   ❌ GOOGLE_AI_API_KEY not set');
+                finalBatch.push({ id: match.id, score: "1-1", confidence: 50, verdict: "API Missing", logic: "Set GOOGLE_AI_API_KEY", isValueBet: false, audit: auditStr });
+                continue;
+            }
+
             const prompt = `Match: ${match.homeTeam} vs ${match.awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}.
             Decide Score/Outcome. Be decisive. JSON only: {"score":"X-Y","confidence":0-100,"verdict":"type","logic":"10 words max","isValueBet":bool}`;
             
@@ -100,23 +127,31 @@ app.post('/api/predict-batch', async (req, res) => {
             let prediction;
             try {
                 const jsonMatch = rawJson.match(/\{.*\}/s);
-                prediction = jsonMatch ? JSON.parse(jsonMatch[0]) : { score: "1-1", confidence: 50, verdict: "Parse error", logic: "AI response invalid", isValueBet: false };
+                if (jsonMatch) {
+                    prediction = JSON.parse(jsonMatch[0]);
+                    console.log(`   ✅ Prediction: ${prediction.score} (${prediction.confidence}%)`);
+                } else {
+                    console.log('   ❌ No JSON found in response');
+                    prediction = { score: "1-1", confidence: 50, verdict: "Parse error", logic: "AI response invalid", isValueBet: false };
+                }
             } catch (parseErr) {
-                console.error("JSON parse error:", parseErr.message);
+                console.log('   ❌ JSON parse error:', parseErr.message);
                 prediction = { score: "1-1", confidence: 50, verdict: "Parse error", logic: "Response parse failed", isValueBet: false };
             }
 
             finalBatch.push({ id: match.id, ...prediction, audit: auditStr });
 
-            // CRITICAL: 3-second pause per match to stay well within Groq TPM limits
-            console.log(`✅ Success. Sleeping 3s to stay safe...`);
+            // 3-second pause for rate limits
+            console.log(`   💤 Sleeping 3s...`);
             await new Promise(r => setTimeout(r, 3000)); 
 
         } catch (err) {
-            console.error(`❌ Failed match: ${match.homeTeam}`, err.message);
-            finalBatch.push({ id: match.id, score: "1-1", confidence: 50, logic: "Process error.", isValueBet: false });
+            console.error(`   ❌ Failed: ${err.message}`);
+            finalBatch.push({ id: match.id, score: "1-1", confidence: 50, verdict: "Error", logic: err.message, isValueBet: false });
         }
     }
+    
+    console.log(`\n✅ Batch complete! ${finalBatch.length} predictions.\n`);
     res.json(finalBatch);
 });
 
