@@ -231,12 +231,53 @@ app.post('/api/start-predictions', async (req, res) => {
         const today = new Date();
         
         console.log('=== Fetching matches ===');
-        console.log('FOOTBALL_DATA_API_KEY:', !!process.env.FOOTBALL_DATA_API_KEY);
         console.log('RAPIDAPI_KEY:', !!process.env.RAPIDAPI_KEY);
+        console.log('FOOTBALL_DATA_API_KEY:', !!process.env.FOOTBALL_DATA_API_KEY);
         
-        // PRIMARY: Football Data API (works reliably)
-        if (process.env.FOOTBALL_DATA_API_KEY) {
-            console.log('Using Football Data API...');
+        // PRIMARY: Free Live Football API (RapidAPI) - more matches worldwide
+        if (process.env.RAPIDAPI_KEY) {
+            console.log('Using Free Live Football API (PRIMARY)...');
+            
+            // Fetch matches for next 7 days
+            for (let i = 0; i < 7; i++) {
+                const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
+                try {
+                    const response = await axios.get(
+                        `https://free-api-live-football-data.p.rapidapi.com/football-getAllMatchesByDate`,
+                        {
+                            params: { date: dateStr },
+                            headers: { 
+                                'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
+                                'x-rapidapi-host': 'free-api-live-football-data.p.rapidapi.com' 
+                            }
+                        }
+                    );
+                    
+                    const fixtures = response.data.response || [];
+                    const newMatches = fixtures.map(m => ({
+                        id: m.fixture?.id || Math.random(),
+                        homeTeam: m.homeTeam?.name || 'Unknown',
+                        awayTeam: m.awayTeam?.name || 'Unknown',
+                        homeId: m.homeTeam?.id || 0,
+                        awayId: m.awayTeam?.id || 0,
+                        league: m.league?.name || 'Unknown',
+                        status: m.fixture?.status?.short || 'SCHEDULED',
+                        utcDate: m.fixture?.date || today.toISOString(),
+                        date: new Date().toLocaleString()
+                    }));
+                    
+                    allMatches.push(...newMatches);
+                    console.log(`${dateStr}: ${newMatches.length} matches`);
+                } catch (e) {
+                    console.log(`${dateStr}: Error - ${e.response?.status}`);
+                }
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+        
+        // SECONDARY: Add matches from Football Data API (fallback)
+        if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 50) {
+            console.log('Adding matches from Football Data API (fallback)...');
             
             for (let i = 0; i < 7; i++) {
                 const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
@@ -259,49 +300,11 @@ app.post('/api/start-predictions', async (req, res) => {
                     }));
                     
                     allMatches.push(...newMatches);
-                    console.log(`${dateStr}: ${newMatches.length} matches`);
+                    console.log(`Football Data ${dateStr}: ${newMatches.length} matches`);
                 } catch (e) {
-                    console.log(`${dateStr}: Error - ${e.response?.status}`);
+                    console.log(`Football Data ${dateStr}: Error`);
                 }
                 await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-        
-        // SECONDARY: Add matches from Free Live Football API
-        if (process.env.RAPIDAPI_KEY && allMatches.length < 100) {
-            console.log('Adding matches from Free Live Football API...');
-            
-            try {
-                const response = await axios.get(
-                    `https://free-api-live-football-data.p.rapidapi.com/football-getAllMatchesByDate`,
-                    {
-                        params: { date: formatDate(today) },
-                        headers: { 
-                            'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
-                            'x-rapidapi-host': 'free-api-live-football-data.p.rapidapi.com' 
-                        }
-                    }
-                );
-                
-                const fixtures = response.data.response || [];
-                console.log(`Free API returned: ${fixtures.length} matches`);
-                
-                const newMatches = fixtures.map(m => ({
-                    id: m.fixture?.id || Math.random(),
-                    homeTeam: m.homeTeam?.name || 'Unknown',
-                    awayTeam: m.awayTeam?.name || 'Unknown',
-                    homeId: m.homeTeam?.id || 0,
-                    awayId: m.awayTeam?.id || 0,
-                    league: m.league?.name || 'Unknown',
-                    status: m.fixture?.status?.short || 'SCHEDULED',
-                    utcDate: m.fixture?.date || today.toISOString(),
-                    date: new Date().toLocaleString()
-                }));
-                
-                allMatches.push(...newMatches);
-                console.log(`Free API added: ${newMatches.length} matches`);
-            } catch (e) {
-                console.log(`Free API error: ${e.response?.status || e.message}`);
             }
         }
         
