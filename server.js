@@ -268,14 +268,14 @@ app.post('/api/start-predictions', async (req, res) => {
         }
         
         // SECONDARY: Add RapidAPI matches if available (for more coverage)
-        if (process.env.RAPIDAPI_KEY && allMatches.length < 50) {
-            console.log('Adding matches from RapidAPI...');
+        if (process.env.RAPIDAPI_KEY && allMatches.length < 100) {
+            console.log('Adding matches from RapidAPI (with delays)...');
             
-            const leagues = [31, 140, 135, 78, 61, 88, 157, 73, 94];
+            const leagues = [31, 140, 135, 78, 61]; // Top 5 leagues only
             const fromDate = formatDate(today);
             const toDate = formatDate(new Date(today.getTime() + 3*24*60*60*1000));
             
-            for (const leagueId of leagues.slice(0, 5)) {
+            for (const leagueId of leagues) {
                 try {
                     const response = await axios.get(
                         `https://api-football-v1.p.rapidapi.com/v3/fixtures`,
@@ -303,7 +303,8 @@ app.post('/api/start-predictions', async (req, res) => {
                 } catch (e) {
                     console.log(`RapidAPI League ${leagueId}: ${e.response?.status}`);
                 }
-                await new Promise(r => setTimeout(r, 1000));
+                // 3 second delay to avoid rate limits
+                await new Promise(r => setTimeout(r, 3000));
             }
         }
         
