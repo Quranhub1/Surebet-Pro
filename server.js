@@ -17,6 +17,7 @@ console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✓ Set' : '✗ Missing
 console.log('DEEPSEEK_API_KEY:', process.env.DEEPSEEK_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('Z_AI_API_KEY:', process.env.Z_AI_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('RAPIDAPI_KEY:', process.env.RAPIDAPI_KEY ? '✓ Set' : '✗ Missing');
+console.log('LIVESCORE_API_KEY:', process.env.LIVESCORE_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('==========================');
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY);
@@ -393,7 +394,47 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // SECONDARY: Add matches from Football Data API (fallback)
+        // SECONDARY: Add matches from Livescore API
+        if (process.env.LIVESCORE_API_KEY && process.env.LIVESCORE_API_SECRET && allMatches.length < 100) {
+            console.log('Adding matches from Livescore API...');
+            
+            try {
+                const response = await axios.get(
+                    'https://livescore-api.com/api-client/users/pair.json',
+                    {
+                        params: {
+                            key: process.env.LIVESCORE_API_KEY,
+                            secret: process.env.LIVESCORE_API_SECRET
+                        }
+                    }
+                );
+                
+                const data = response.data;
+                console.log('Livescore API response:', JSON.stringify(data).substring(0, 200));
+                
+                // Parse based on API structure
+                if (data.matches) {
+                    const matches = data.matches.map(m => ({
+                        id: m.id || Math.random(),
+                        homeTeam: m.home || m.home_team || 'Unknown',
+                        awayTeam: m.away || m.away_team || 'Unknown',
+                        homeId: 0,
+                        awayId: 0,
+                        league: m.league || m.competition || 'Unknown',
+                        status: m.status || 'SCHEDULED',
+                        utcDate: m.time || m.date || today.toISOString(),
+                        date: new Date().toLocaleString()
+                    }));
+                    
+                    allMatches.push(...matches);
+                    console.log(`Livescore API: ${matches.length} matches`);
+                }
+            } catch (e) {
+                console.log(`Livescore API Error: ${e.response?.status || e.message}`);
+            }
+        }
+        
+        // TERTIARY: Add matches from Football Data API (fallback)
         if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 50) {
             console.log('Adding matches from Football Data API (fallback)...');
             
