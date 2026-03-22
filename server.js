@@ -20,8 +20,12 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || process.en
 const leadAnalyst = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// Store predictions in memory
+let predictionsCache = {};
+let processingStatus = { total: 0, processed: 0, isProcessing: false };
+
 /**
- * FETCH HISTORICAL H2H (Statistician Agent)
+ * FETCH HISTORICAL H2H
  */
 async function getHistory(h, a) {
     if (!process.env.RAPIDAPI_KEY) return "No history.";
@@ -38,7 +42,7 @@ async function getHistory(h, a) {
 }
 
 /**
- * FETCH LIVE NEWS (Researcher Agent)
+ * FETCH LIVE NEWS
  */
 async function getLiveIntel(home, away) {
     if (!process.env.TAVILY_API_KEY) return "No news.";
@@ -55,18 +59,24 @@ async function getLiveIntel(home, away) {
 }
 
 /**
- * Try Google AI first, fallback to Groq
+ * Get prediction with more betting markets
  */
 async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
     // Try Google AI first
     if (process.env.GOOGLE_AI_API_KEY) {
         try {
             const prompt = `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}.
-            Decide Score/Outcome. Be decisive. JSON only: {"score":"X-Y","confidence":0-100,"verdict":"type","logic":"10 words max","isValueBet":bool}`;
+            Provide comprehensive prediction JSON:
+            {"score":"X-Y","confidence":0-100,"verdict":"Pick","logic":"10 words",
+            "doubleChance":"1X, X2, or 12",
+            "overUnder":"Over 2.5 or Under 2.5",
+            "btts":"Yes or No",
+            "handicap":"Home -1, Away +1, or 0",
+            "isValueBet":bool}`;
             
             const gemRes = await leadAnalyst.generateContent(prompt);
             const rawJson = gemRes.response.text();
-            const jsonMatch = rawJson.match(/\{.*\}/s);
+            const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
             
             if (jsonMatch) {
                 const prediction = JSON.parse(jsonMatch[0]);
@@ -75,8 +85,6 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
             }
         } catch (googleErr) {
             console.log(`   ⚠️ Google AI failed: ${googleErr.message.substring(0, 50)}`);
-            
-            // Check if it's a quota error
             if (googleErr.message.includes('429') || googleErr.message.includes('quota')) {
                 console.log(`   🔄 Quota exceeded, switching to Groq...`);
             }
@@ -89,7 +97,7 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
             console.log(`   🔄 Using Groq fallback...`);
             const groqRes = await groq.chat.completions.create({
                 messages: [
-                    { role: "system", content: "Football expert predictor. Return JSON with score, confidence (0-100), verdict, logic (10 words), isValueBet (bool)." },
+                    { role: "system", content: "Football expert predictor. Return JSON with score, confidence (0-100), verdict, logic (10 words), doubleChance (1X/X2/12), overUnder (Over 2.5/Under 2.5), btts (Yes/No), handicap, isValueBet (bool)." },
                     { role: "user", content: `Match: ${homeTeam} vs ${awayTeam}. H2H: ${h2h}. Audit: ${auditStr}. News: ${news}. Provide prediction in JSON format.` }
                 ],
                 model: "llama-3.1-8b-instant",
@@ -109,78 +117,152 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
         }
     }
     
-    // Both failed
-    return { score: "1-1", confidence: 50, verdict: "API Error", logic: "Both AI services failed", isValueBet: false };
+    return null;
 }
 
 /**
- * MAIN BATCH ENDPOINT (Paced for rate limits)
+ * Process a batch of matches
  */
-app.post('/api/predict-batch', async (req, res) => {
-    const { matches } = req.body;
+async function processBatch(matches, startIndex) {
+    const batchSize = 15;
+    const endIndex = Math.min(startIndex + batchSize, matches.length);
     
-    // Input validation
-    if (!matches || !Array.isArray(matches)) {
-        return res.status(400).json({ error: 'Invalid matches data' });
-    }
-    
-    if (matches.length === 0) {
-        return res.json([]);
-    }
-    
-    const finalBatch = [];
-
-    console.log(`🚀 Starting batch analysis for ${matches.length} games...`);
-
-    for (const match of matches) {
+    for (let i = startIndex; i < endIndex; i++) {
+        const match = matches[i];
+        
         try {
-            console.log(`\n🤖 Processing: ${match.homeTeam} vs ${match.awayTeam}`);
+            console.log(`\n🤖 [${i+1}/${matches.length}] ${match.homeTeam} vs ${match.awayTeam}`);
 
-            // Parallel Data Fetch
             const [h2h, news] = await Promise.all([
                 getHistory(match.homeId, match.awayId),
                 getLiveIntel(match.homeTeam, match.awayTeam)
             ]);
 
-            console.log(`   H2H: ${h2h}`);
-
-            // Groq Auditor Agent (for risk checking)
-            let auditStr = "No audit available.";
+            let auditStr = "No audit.";
             if (process.env.GROQ_API_KEY) {
                 try {
                     const groqRes = await groq.chat.completions.create({
-                        messages: [
-                            { role: "system", content: "Expert bet auditor. Find the trap. Result must be 1 sentence max." },
-                            { role: "user", content: `History: ${h2h}. News: ${news}. ${match.homeTeam} vs ${match.awayTeam}.` }
-                        ],
+                        messages: [{ role: "system", content: "Expert bet auditor. Find trap. 1 sentence." }, 
+                                   { role: "user", content: `H2H: ${h2h}. News: ${news}.` }],
                         model: "llama-3.1-8b-instant"
                     });
                     auditStr = groqRes.choices[0].message.content;
-                    console.log(`   Audit: ${auditStr}`);
-                } catch (groqErr) {
-                    console.log(`   ⚠️ Audit skipped: ${groqErr.message.substring(0, 30)}`);
-                }
+                } catch (e) {}
             }
 
-            // Get prediction (tries Google first, then Groq)
             const prediction = await getPrediction(match.homeTeam, match.awayTeam, h2h, news, auditStr);
-
-            finalBatch.push({ id: match.id, ...prediction, audit: auditStr });
-
-            // Reduced delay - only 1 second between predictions
-            await new Promise(r => setTimeout(r, 1000)); 
-
+            
+            if (prediction) {
+                predictionsCache[match.id] = { 
+                    ...match, 
+                    ai: { ...prediction, audit: auditStr },
+                    processed: true
+                };
+            } else {
+                predictionsCache[match.id] = { 
+                    ...match, 
+                    ai: { score: "N/A", confidence: 0, verdict: "Failed", logic: "API error", failed: true },
+                    processed: true
+                };
+            }
+            
+            processingStatus.processed = Object.keys(predictionsCache).length;
+            
+            // 10 second delay between batches
+            if (i < endIndex - 1) {
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            
         } catch (err) {
             console.error(`   ❌ Failed: ${err.message}`);
-            finalBatch.push({ id: match.id, score: "1-1", confidence: 50, verdict: "Error", logic: err.message, isValueBet: false });
+            predictionsCache[match.id] = { 
+                ...match, 
+                ai: { score: "N/A", confidence: 0, verdict: "Error", logic: err.message, failed: true },
+                processed: true
+            };
         }
     }
     
-    console.log(`\n✅ Batch complete! ${finalBatch.length} predictions.\n`);
-    res.json(finalBatch);
+    // If more matches to process, schedule next batch
+    if (endIndex < matches.length) {
+        console.log(`\n📊 Processed ${endIndex}/${matches.length}. Waiting 10s for next batch...`);
+        setTimeout(() => processBatch(matches, endIndex), 10000);
+    } else {
+        console.log(`\n✅ All ${matches.length} predictions complete!`);
+        processingStatus.isProcessing = false;
+    }
+}
+
+// Start processing endpoint
+app.post('/api/start-predictions', async (req, res) => {
+    if (processingStatus.isProcessing) {
+        return res.json({ status: 'already_processing', ...processingStatus });
+    }
+    
+    try {
+        const response = await axios.get('https://api.football-data.org/v4/matches', { 
+            headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } 
+        });
+        
+        const matches = (response.data.matches || []).slice(0, 200).map(m => ({
+            id: m.id,
+            homeTeam: m.homeTeam.name,
+            awayTeam: m.awayTeam.name,
+            homeId: m.homeTeam.id,
+            awayId: m.awayTeam.id,
+            league: m.competition.name,
+            status: m.status,
+            utcDate: m.utcDate,
+            date: new Date(m.utcDate).toLocaleString()
+        }));
+        
+        predictionsCache = {};
+        processingStatus = { total: matches.length, processed: 0, isProcessing: true };
+        
+        // Start processing in background
+        processBatch(matches, 0);
+        
+        res.json({ status: 'started', total: matches.length });
+        
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
-// Football Proxy
+// Get current predictions
+app.get('/api/predictions', (req, res) => {
+    const predictions = Object.values(predictionsCache).filter(p => p.processed);
+    const failed = predictions.filter(p => p.ai?.failed);
+    const successful = predictions.filter(p => !p.ai?.failed);
+    
+    res.json({ 
+        predictions: successful,
+        failedCount: failed.length,
+        total: processingStatus.total,
+        processed: processingStatus.processed,
+        isProcessing: processingStatus.isProcessing
+    });
+});
+
+// Legacy endpoint
+app.post('/api/predict-batch', async (req, res) => {
+    const { matches } = req.body;
+    if (!matches || !Array.isArray(matches)) {
+        return res.status(400).json({ error: 'Invalid matches data' });
+    }
+    
+    const results = [];
+    for (const match of matches) {
+        if (predictionsCache[match.id]) {
+            results.push(predictionsCache[match.id]);
+        } else {
+            results.push({ ...match, ai: { score: "Pending", confidence: 0, verdict: "Processing" }});
+        }
+    }
+    res.json(results);
+});
+
+// Football API proxy
 app.get('/api/football-data/matches', async (req, res) => {
     if (!process.env.FOOTBALL_DATA_API_KEY) {
         return res.status(500).json({ error: 'FOOTBALL_DATA_API_KEY not configured.' });
