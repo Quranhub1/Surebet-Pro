@@ -96,7 +96,7 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
                 return result;
             }
         } catch (e) {
-            console.log(`   ⚠️ Google Gemini failed: ${e.message.substring(0,30)}`);
+            console.log(`   ⚠️ Gemini failed: ${e.response?.status || e.message.substring(0,40)}`);
         }
     }
     
