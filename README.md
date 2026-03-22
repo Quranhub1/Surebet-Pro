@@ -75,7 +75,7 @@ For secure production deployment, use environment variables:
    GROQ_API_KEY=your_groq_api_key_here
    OPENAI_API_KEY=your_openai_api_key_here
    ANTHROPIC_API_KEY=your_anthropic_api_key_here
-   GOOGLE_API_KEY=your_google_ai_api_key_here
+   GOOGLE_AI_API_KEY=your_google_ai_api_key_here
    HUGGINGFACE_API_KEY=your_huggingface_api_key_here
    COHERE_API_KEY=your_cohere_api_key_here
 
@@ -113,7 +113,7 @@ For secure production deployment, use environment variables:
      GROQ_API_KEY=your_groq_api_key
      OPENAI_API_KEY=your_openai_api_key
      ANTHROPIC_API_KEY=your_anthropic_api_key
-     GOOGLE_API_KEY=your_google_ai_api_key
+     GOOGLE_AI_API_KEY=your_google_ai_api_key
      HUGGINGFACE_API_KEY=your_huggingface_api_key
      COHERE_API_KEY=your_cohere_api_key
      DEFAULT_AI_PROVIDER=groq

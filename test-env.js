@@ -10,7 +10,7 @@ const requiredVars = [
   'GROQ_API_KEY',
   'OPENAI_API_KEY',
   'ANTHROPIC_API_KEY',
-  'GOOGLE_API_KEY',
+  'GOOGLE_AI_API_KEY',
   'HUGGINGFACE_API_KEY',
   'COHERE_API_KEY'
 ];

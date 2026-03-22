@@ -3,6 +3,9 @@
 echo "🚀 SureBet Pro - Deployment Script"
 echo "=================================="
 
+# Configuration - Update these values for your repository
+GITHUB_REPO="Quranhub1/Surebet-Pro"
+
 # Check if git is initialized
 if [ ! -d ".git" ]; then
     echo "📝 Initializing Git repository..."
@@ -14,8 +17,8 @@ fi
 # Check if remote is set
 if ! git remote get-url origin > /dev/null 2>&1; then
     echo "🔗 Setting up GitHub remote..."
-    echo "Make sure to create the repository at: https://github.com/Quranhub1/Surebet-Pro"
-    echo "Then run: git remote add origin https://github.com/Quranhub1/Surebet-Pro.git"
+    echo "Make sure to create the repository at: https://github.com/$GITHUB_REPO"
+    echo "Then run: git remote add origin https://github.com/$GITHUB_REPO.git"
     echo "Finally run: git push -u origin main"
 else
     echo "📤 Pushing to GitHub..."
@@ -27,7 +30,7 @@ fi
 echo ""
 echo "✅ Deployment files created!"
 echo "📋 Next steps:"
-echo "1. Create repository at: https://github.com/Quranhub1/Surebet-Pro"
+echo "1. Create repository at: https://github.com/$GITHUB_REPO"
 echo "2. Push code: git push -u origin main"
 echo "3. Connect to Render:"
 echo "   - Go to https://dashboard.render.com"
