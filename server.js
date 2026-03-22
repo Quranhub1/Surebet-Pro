@@ -217,6 +217,9 @@ async function processBatch(matches, startIndex) {
     }
 }
 
+// Helper: format date for API
+const formatDate = (d) => d.toISOString().split('T')[0];
+
 // Start processing endpoint
 app.post('/api/start-predictions', async (req, res) => {
     if (processingStatus.isProcessing) {
@@ -224,21 +227,59 @@ app.post('/api/start-predictions', async (req, res) => {
     }
     
     try {
-        const response = await axios.get('https://api.football-data.org/v4/matches', { 
-            headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } 
-        });
+        const allMatches = [];
+        const today = new Date();
         
-        const matches = (response.data.matches || []).slice(0, 200).map(m => ({
-            id: m.id,
-            homeTeam: m.homeTeam.name,
-            awayTeam: m.awayTeam.name,
-            homeId: m.homeTeam.id,
-            awayId: m.awayTeam.id,
-            league: m.competition.name,
-            status: m.status,
-            utcDate: m.utcDate,
-            date: new Date(m.utcDate).toLocaleString()
-        }));
+        // Fetch matches from multiple date ranges to get 200+
+        const dateRanges = [
+            { date: today, days: 1 },
+            { date: new Date(today.getTime() + 1*24*60*60*1000), days: 3 },
+            { date: new Date(today.getTime() + 2*24*60*60*1000), days: 3 },
+            { date: new Date(today.getTime() + 3*24*60*60*1000), days: 3 },
+            { date: new Date(today.getTime() + 4*24*60*60*1000), days: 3 },
+        ];
+        
+        console.log('Fetching matches from multiple date ranges...');
+        
+        for (const range of dateRanges) {
+            try {
+                const dateStr = formatDate(range.date);
+                const response = await axios.get(
+                    `https://api.football-data.org/v4/matches?dateFrom=${dateStr}&dateTo=${dateStr}`,
+                    { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                );
+                
+                const matches = (response.data.matches || []).map(m => ({
+                    id: m.id,
+                    homeTeam: m.homeTeam.name,
+                    awayTeam: m.awayTeam.name,
+                    homeId: m.homeTeam.id,
+                    awayId: m.awayTeam.id,
+                    league: m.competition.name,
+                    status: m.status,
+                    utcDate: m.utcDate,
+                    date: new Date(m.utcDate).toLocaleString()
+                }));
+                
+                allMatches.push(...matches);
+                console.log(`   ${dateStr}: ${matches.length} matches`);
+            } catch (e) {
+                console.log(`   Failed to fetch ${formatDate(range.date)}: ${e.message.substring(0,50)}`);
+            }
+        }
+        
+        // Remove duplicates by ID
+        const uniqueMatches = [];
+        const seen = new Set();
+        for (const m of allMatches) {
+            if (!seen.has(m.id)) {
+                seen.add(m.id);
+                uniqueMatches.push(m);
+            }
+        }
+        
+        const matches = uniqueMatches.slice(0, 200);
+        console.log(`\nTotal unique matches: ${matches.length}`);
         
         predictionsCache = {};
         processingStatus = { total: matches.length, processed: 0, isProcessing: true };
