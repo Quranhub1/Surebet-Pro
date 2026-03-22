@@ -28,6 +28,9 @@ Thumbs.db
 logs
 *.log
 
+# Cache files
+fixtures-cache.json
+
 # Runtime data
 pids
 *.pid
