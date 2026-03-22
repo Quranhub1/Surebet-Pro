@@ -16,8 +16,6 @@
         h1, h2, h3, .brand { font-family: 'Lexend', sans-serif; }
         .glass { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.05); }
         .sidebar-item-active { background: linear-gradient(90deg, rgba(59, 130, 246, 0.2) 0%, transparent 100%); border-left: 4px solid #3b82f6; color: #60a5fa; font-weight: 700; }
-        .card-pro { background: linear-gradient(135deg, #111827 0%, #030712 100%); border: 1px solid #1f2937; border-radius: 24px; transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-        .card-pro:hover { transform: translateY(-5px); border-color: #3b82f6; box-shadow: 0 10px 40px -10px rgba(59, 130, 246, 0.2); }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 10px; }
         .glow-btn { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
@@ -32,7 +30,6 @@
         function App() {
             const [matches, setMatches] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [currentView, setCurrentView] = useState('predictions');
             const [sidebarOpen, setSidebarOpen] = useState(false);
 
             const runEngine = async () => {
@@ -46,7 +43,8 @@
                         return;
                     }
                     const json = await res.json();
-                    const topGames = (json.matches || []).slice(0, 15);
+                    // Get up to 100 matches
+                    const topGames = (json.matches || []).slice(0, 100);
                     
                     const payload = topGames.map(m => ({
                         id: m.id, homeTeam: m.homeTeam.name, awayTeam: m.awayTeam.name,
@@ -66,124 +64,73 @@
                 setLoading(false);
             };
 
-            const SideLink = ({ view, icon, label }) => (
-                <button 
-                    onClick={() => { setCurrentView(view); setSidebarOpen(false); }}
-                    className={`w-full flex items-center gap-4 py-4 px-8 text-sm transition-all mb-1 ${currentView === view ? 'sidebar-item-active' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    <i className={`fas ${icon} text-lg w-6`}></i>
-                    <span className="uppercase tracking-widest">{label}</span>
-                </button>
-            );
-
             return (
-                <div className="flex flex-col md:flex-row min-h-screen relative">
+                <div className="flex flex-col min-h-screen relative">
                     
-                    {/* MOBILE TOP BAR - Hamburger on right */}
+                    {/* TOP BAR */}
                     <div className="glass fixed top-0 w-full z-50 px-4 py-3 flex justify-between items-center">
                         <h1 className="brand font-black text-lg tracking-tighter">JOESBET <span className="text-blue-500">AI</span></h1>
-                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-white p-2">
-                            <i className={`fas ${sidebarOpen ? 'fa-times' : 'fa-ellipsis'} text-xl`}></i>
+                        <button onClick={runEngine} disabled={loading} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest glow-btn disabled:opacity-50">
+                            {loading ? <i className="fas fa-spinner animate-spin"></i> : <i className="fas fa-microchip mr-2"></i>}
+                            {loading ? "Loading..." : "RUN"}
                         </button>
                     </div>
 
-                    {/* SIDE NAVIGATION - Hidden on mobile, slides from left */}
-                    <div className={`fixed inset-y-0 left-0 w-72 glass border-r border-gray-800 z-40 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out`}>
-                        <div className="p-8 pt-20 md:pt-20">
-                            <h1 className="brand font-black text-2xl leading-none tracking-tighter mb-2 italic">JOESBET</h1>
-                            <h2 className="text-blue-500 font-bold text-xs uppercase tracking-[0.3em]">Predictor v1.3</h2>
-                        </div>
-                        <nav className="mt-4 flex-1">
-                            <SideLink view="predictions" icon="fa-bullseye" label="Winning Picks" />
-                            <SideLink view="audit" icon="fa-shield-halved" label="Risk Auditor" />
-                            <div className="px-8 mt-10">
-                                <button 
-                                    onClick={runEngine}
-                                    disabled={loading}
-                                    className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all glow-btn flex items-center justify-center gap-3 disabled:opacity-50 disabled:glow-none"
-                                >
-                                    {loading ? <i className="fas fa-spinner animate-spin text-lg"></i> : <i className="fas fa-microchip"></i>}
-                                    {loading ? "Agent Debate" : "Compute Tips"}
-                                </button>
-                            </div>
-                        </nav>
-                        <div className="p-8 mt-auto border-t border-gray-800 opacity-30 text-[10px] uppercase font-bold tracking-widest text-center">
-                            Realtime Orchestration
-                        </div>
-                    </div>
-
-                    {/* CONTENT CONTAINER */}
-                    <main className="flex-1 p-4 md:p-16 pt-20 md:pt-20 max-w-7xl mx-auto w-full">
+                    {/* MAIN TABLE */}
+                    <main className="flex-1 pt-16 p-4">
                         
-                        <div className="mb-8 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-gray-900 pb-6 text-center md:text-left">
-                            <div>
-                                <h2 className="text-3xl md:text-4xl font-black tracking-tight capitalize">{currentView} <span className="text-blue-500 text-sm italic font-light tracking-[0.4em] ml-2 md:ml-4">Engine</span></h2>
-                                <p className="text-gray-500 text-xs mt-2 font-bold uppercase tracking-widest">Multi-Agent Intelligence</p>
-                            </div>
-                            <div className="hidden lg:flex items-center gap-4 bg-emerald-500/5 px-6 py-2 rounded-full border border-emerald-500/20">
-                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
-                                <span className="text-[10px] text-emerald-500 font-black uppercase">4 Agents Active</span>
-                            </div>
-                        </div>
-
                         {matches.length === 0 && !loading && (
-                            <div className="py-32 text-center opacity-20 flex flex-col items-center">
-                                <i className="fas fa-network-wired text-6xl md:text-8xl mb-6"></i>
-                                <h3 className="text-xl md:text-2xl font-bold uppercase tracking-widest italic">Awaiting Logic Pulse</h3>
+                            <div className="py-32 text-center opacity-20">
+                                <i className="fas fa-futbol text-6xl mb-4"></i>
+                                <h3 className="text-xl font-bold">Press RUN to load predictions</h3>
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                            {matches.map(m => (
-                                <div key={m.id} className="card-pro p-6 md:p-8 flex flex-col gap-4 md:gap-6">
-                                    <div className="flex justify-between items-start border-b border-gray-900/50 pb-4">
-                                        <div className="flex-1">
-                                            <span className="text-[10px] font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-lg uppercase tracking-tighter mb-3 inline-block">{m.competition.name}</span>
-                                            <h3 className="text-xl md:text-2xl font-black text-white leading-none tracking-tight flex flex-col md:flex-row md:items-center gap-1 md:gap-3">
-                                                {m.homeTeam.name} <span className="text-gray-700 text-sm font-light">vs</span> {m.awayTeam.name}
-                                            </h3>
-                                        </div>
-                                        <div className="bg-gray-950/80 px-4 md:px-6 py-3 rounded-2xl border border-gray-800 text-center min-w-[90px]">
-                                            <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">Prediction</span>
-                                            <div className="text-2xl md:text-3xl font-black text-white tabular-nums">{m.ai.score || "--"}</div>
-                                        </div>
-                                    </div>
+                        {matches.length > 0 && (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-widest">
+                                            <th className="text-left py-3 px-2">League</th>
+                                            <th className="text-left py-3 px-2">Home</th>
+                                            <th className="text-left py-3 px-2">Away</th>
+                                            <th className="text-center py-3 px-2">Score</th>
+                                            <th className="text-center py-3 px-2">Confidence</th>
+                                            <th className="text-left py-3 px-2">Verdict</th>
+                                            <th className="text-left py-3 px-2 hidden md:table-cell">Logic</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {matches.map((m, i) => (
+                                            <tr key={m.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                                                <td className="py-3 px-2 text-blue-500 text-xs font-bold">{m.competition?.name || 'N/A'}</td>
+                                                <td className="py-3 px-2 font-medium">{m.homeTeam?.name || 'TBD'}</td>
+                                                <td className="py-3 px-2 font-medium">{m.awayTeam?.name || 'TBD'}</td>
+                                                <td className="py-3 px-2 text-center font-black text-lg text-blue-400">{m.ai?.score || '--'}</td>
+                                                <td className="py-3 px-2 text-center">
+                                                    <span className={`font-bold ${(m.ai?.confidence || 0) > 75 ? 'text-green-400' : 'text-blue-400'}`}>
+                                                        {m.ai?.confidence || 0}%
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-2">
+                                                    <span className="bg-gray-800 px-2 py-1 rounded text-xs font-bold uppercase">
+                                                        {m.ai?.verdict || 'Waiting'}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-2 text-gray-400 text-xs hidden md:table-cell">{m.ai?.logic || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
 
-                                    {currentView === 'predictions' && (
-                                        <div className="bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 min-h-[60px]">
-                                            <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest block mb-2">Strategy logic:</span>
-                                            <p className="text-sm text-gray-300 font-medium leading-snug">"{m.ai.logic || "Agent reports required for synthesis..."}"</p>
-                                        </div>
-                                    )}
-
-                                    {currentView === 'audit' && (
-                                        <div className="bg-red-500/5 p-4 rounded-xl border border-red-500/10">
-                                            <span className="text-[9px] font-black text-red-500/60 uppercase tracking-widest block mb-2"><i className="fas fa-eye"></i> Groq Risk Scanner:</span>
-                                            <p className="text-xs text-red-400 font-bold leading-relaxed italic uppercase">"{m.ai.audit || "Logic verification disabled until execution."}"</p>
-                                        </div>
-                                    )}
-
-                                    <div className="flex justify-between items-center pt-2">
-                                        <div className="flex items-center gap-6 md:gap-10">
-                                            <div className="flex flex-col">
-                                                <span className="text-[8px] font-black text-gray-500 uppercase">Edge Accuracy</span>
-                                                <span className={`text-lg md:text-xl font-black ${m.ai.confidence > 75 ? 'text-blue-500 underline underline-offset-4' : 'text-blue-500/50'}`}>{m.ai.confidence || 0}%</span>
-                                            </div>
-                                            {m.ai.isValueBet && (
-                                                <div className="text-[9px] font-black px-3 py-2 bg-emerald-600/10 text-emerald-500 border border-emerald-600/30 rounded-xl tracking-tighter uppercase animate-pulse">Smart Entry</div>
-                                            )}
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="text-[8px] font-black text-gray-600 uppercase italic mb-1 block underline decoration-blue-500">Pick Status</span>
-                                            <span className="text-xs font-black uppercase text-gray-200 tracking-widest">{m.ai.verdict || "Waiting..." }</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        {matches.length > 0 && (
+                            <div className="text-center py-4 text-gray-500 text-xs">
+                                Showing {matches.length} matches
+                            </div>
+                        )}
                     </main>
-
-                    {sidebarOpen && <div className="fixed inset-0 bg-black/90 z-30" onClick={() => setSidebarOpen(false)}></div>}
                 </div>
             );
         }
