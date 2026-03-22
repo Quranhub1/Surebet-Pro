@@ -14,6 +14,8 @@ console.log('=== Environment Check ===');
 console.log('FOOTBALL_DATA_API_KEY:', process.env.FOOTBALL_DATA_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? '✓ Set' : '✗ Missing');
 console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('DEEPSEEK_API_KEY:', process.env.DEEPSEEK_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('RAPIDAPI_KEY:', process.env.RAPIDAPI_KEY ? '✓ Set' : '✗ Missing');
 console.log('==========================');
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY);
@@ -138,7 +140,7 @@ async function getPrediction(homeTeam, awayTeam, h2h, news, auditStr) {
                 return result;
             }
         } catch (e) {
-            console.log(`   ⚠️ DeepSeek failed: ${e.message.substring(0,30)}`);
+            console.log(`   ⚠️ DeepSeek failed: ${e.response?.status || e.message.substring(0,40)}`);
         }
     }
     
