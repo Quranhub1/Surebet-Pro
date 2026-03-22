@@ -101,7 +101,7 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {matches.map((m, i) => (
+                                        {matches.filter(m => m.homeTeam && m.awayTeam).map((m, i) => (
                                             <tr key={m.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
                                                 <td className="py-3 px-2 text-blue-500 text-xs font-bold">{m.competition?.name || 'N/A'}</td>
                                                 <td className="py-3 px-2 font-medium">{m.homeTeam?.name || 'TBD'}</td>
