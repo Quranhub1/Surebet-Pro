@@ -101,12 +101,12 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {matches.filter(m => m.homeTeam && m.awayTeam).map((m, i) => (
+                                        {matches.filter(m => m.homeTeam?.name && m.awayTeam?.name).map((m, i) => (
                                             <tr key={m.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                                                <td className="py-3 px-2 text-blue-500 text-xs font-bold">{m.competition?.name || 'N/A'}</td>
-                                                <td className="py-3 px-2 font-medium">{m.homeTeam?.name || 'TBD'}</td>
-                                                <td className="py-3 px-2 font-medium">{m.awayTeam?.name || 'TBD'}</td>
-                                                <td className="py-3 px-2 text-center font-black text-lg text-blue-400">{m.ai?.score || '--'}</td>
+                                                <td className="py-3 px-2 text-blue-500 text-xs font-bold">{String(m.competition?.name || 'N/A')}</td>
+                                                <td className="py-3 px-2 font-medium">{String(m.homeTeam?.name || 'TBD')}</td>
+                                                <td className="py-3 px-2 font-medium">{String(m.awayTeam?.name || 'TBD')}</td>
+                                                <td className="py-3 px-2 text-center font-black text-lg text-blue-400">{String(m.ai?.score || '--')}</td>
                                                 <td className="py-3 px-2 text-center">
                                                     <span className={`font-bold ${(m.ai?.confidence || 0) > 75 ? 'text-green-400' : 'text-blue-400'}`}>
                                                         {m.ai?.confidence || 0}%
@@ -117,7 +117,7 @@
                                                         {m.ai?.verdict || 'Waiting'}
                                                     </span>
                                                 </td>
-                                                <td className="py-3 px-2 text-gray-400 text-xs hidden md:table-cell">{m.ai?.logic || '-'}</td>
+                                                <td className="py-3 px-2 text-gray-400 text-xs hidden md:table-cell">{String(m.ai?.logic || '-')}</td>
                                             </tr>
                                         ))}
                                     </tbody>
