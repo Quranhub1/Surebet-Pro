@@ -395,19 +395,52 @@ app.post('/api/start-predictions', async (req, res) => {
         // Always fetch fresh data (no cache)
         console.log('🔄 Fetching fresh data from APIs...');
         
-        // Try free WorldFootball API (always try)
-        if (true) {
-            console.log('Trying WorldFootball API...');
+        // PRIMARY: Football Data API (user's primary choice)
+        if (process.env.FOOTBALL_DATA_API_KEY) {
+            console.log('Fetching from Football Data API (PRIMARY)...');
             try {
-                const response = await axios.get('https://www.worldfootball.net/api_val.php?apiuebersicht=soccer');
-                console.log(`WorldFootball response: ${response.status}`);
+                const response = await axios.get(
+                    'https://api.football-data.org/v4/matches',
+                    { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                );
+                console.log(`Football Data API: ${response.data.count || 0} matches`);
+                const newMatches = (response.data.matches || []).map(m => ({
+                    id: m.id,
+                    homeTeam: m.homeTeam?.name || 'Unknown',
+                    awayTeam: m.awayTeam?.name || 'Unknown',
+                    homeId: m.homeTeam?.id || 0,
+                    awayId: m.awayTeam?.id || 0,
+                    league: m.competition?.name || 'Unknown',
+                    status: m.status,
+                    utcDate: m.utcDate,
+                    date: new Date(m.utcDate).toLocaleString()
+                })).filter(m => m.homeTeam !== 'Unknown');
+                allMatches.push(...newMatches);
+                console.log(`Football Data: ${newMatches.length} matches`);
             } catch (e) {
-                console.log(`WorldFootball Error: ${e.message}`);
+                console.log(`Football Data API Error: ${e.message}`);
+            }
+            
+            // Also try date-specific queries
+            for (let i = 0; i < 3; i++) {
+                const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
+                try {
+                    const response = await axios.get(
+                        `https://api.football-data.org/v4/matches?date=${dateStr}`,
+                        { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                    );
+                    const newMatches = (response.data.matches || []).map(m => ({
+                        id: m.id, homeTeam: m.homeTeam?.name, awayTeam: m.awayTeam?.name, homeId: m.homeTeam?.id, awayId: m.awayTeam?.id, league: m.competition?.name, status: m.status, utcDate: m.utcDate, date: new Date(m.utcDate).toLocaleString()
+                    })).filter(m => m.homeTeam);
+                    allMatches.push(...newMatches);
+                    console.log(`Football Data ${dateStr}: ${newMatches.length} matches`);
+                } catch (e) { console.log(`Football Data ${dateStr}: Error`); }
+                await new Promise(r => setTimeout(r, 500));
             }
         }
         
-        // Try API-Football (always try)
-        if (process.env.RAPIDAPI_KEY) {
+        // SECONDARY: Try API-Football via RapidAPI
+        if (process.env.RAPIDAPI_KEY && allMatches.length < 50) {
             console.log('Trying API-Football via RapidAPI...');
             try {
                 const response = await axios.get(
@@ -437,7 +470,7 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Also try FlashScore API (always, no length restriction)
+        // Also try FlashScore API
         if (process.env.RAPIDAPI_KEY) {
             console.log('Trying FlashScore API...');
             try {
@@ -640,19 +673,21 @@ app.post('/api/start-predictions', async (req, res) => {
         
         // Filter to only show upcoming/scheduled matches (not completed ones)
         const now = new Date();
-        const todayStart = today;  // Use existing today variable
         const upcomingMatches = unique.filter(m => {
             const matchTime = new Date(m.utcDate);
-            // Show matches that are scheduled or live (not completed)
             const status = String(m.status).toUpperCase();
+            // Show LIVE matches
             if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
+            // Hide FINISHED/COMPLETED matches
             if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
+            // Hide POSTPONED/CANCELLED
             if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
-            // Filter out matches from yesterday
-            const matchDate = new Date(matchTime.getFullYear(), matchTime.getMonth(), matchTime.getDate());
-            if (matchDate < todayStart) return false;
-            // Show matches that haven't started yet
-            return matchTime >= now || m.status === 'SCHEDULED' || m.status === 'Timed';
+            // Show if no status (default to showing)
+            if (!status || status === 'UNKNOWN') return true;
+            // Show SCHEDULED or TIMED
+            if (m.status === 'SCHEDULED' || m.status === 'Timed') return true;
+            // Default: show
+            return true;
         });
         
         const matches = upcomingMatches.slice(0, 200);
@@ -860,18 +895,20 @@ async function autoGeneratePredictions() {
         }
         
         // Filter to only show upcoming/scheduled matches
-        const now = new Date();
-        const todayStart = today;  // Use existing today variable
         const upcomingMatches = unique.filter(m => {
-            const matchTime = new Date(m.utcDate);
             const status = String(m.status).toUpperCase();
+            // Show LIVE matches
             if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
+            // Hide FINISHED/COMPLETED
             if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
+            // Hide POSTPONED/CANCELLED
             if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
-            // Filter out matches from yesterday
-            const matchDate = new Date(matchTime.getFullYear(), matchTime.getMonth(), matchTime.getDate());
-            if (matchDate < todayStart) return false;
-            return matchTime >= now || m.status === 'SCHEDULED' || m.status === 'Timed';
+            // Show if no status
+            if (!status || status === 'UNKNOWN') return true;
+            // Show SCHEDULED or TIMED
+            if (m.status === 'SCHEDULED' || m.status === 'Timed') return true;
+            // Default: show
+            return true;
         });
         
         const matches = upcomingMatches.slice(0, 200);
