@@ -412,25 +412,34 @@ app.post('/api/start-predictions', async (req, res) => {
                     }
                 );
                 
-                const data = response.data.response || [];
+                // Handle various response formats
+                let data = [];
+                if (Array.isArray(response.data)) data = response.data;
+                else if (Array.isArray(response.data.response)) data = response.data.response;
+                else if (Array.isArray(response.data.data)) data = response.data.data;
+                else if (response.data.results) data = response.data.results;
+                
                 console.log(`Livescore API returned: ${data.length} items`);
                 
                 for (const item of data) {
-                    // Handle different response formats
-                    const home = item.homeTeam?.name || item.homeTeam || item.home || 'Unknown';
-                    const away = item.awayTeam?.name || item.awayTeam || item.away || 'Unknown';
-                    const leagueName = item.league?.name || item.league || item.competition || 'Unknown';
+                    // Handle nested and flat formats
+                    const homeObj = item.homeTeam || item.home || item.home_team || {};
+                    const awayObj = item.awayTeam || item.away || item.away_team || {};
+                    const home = typeof homeObj === 'string' ? homeObj : (homeObj.name || homeObj || 'Unknown');
+                    const away = typeof awayObj === 'string' ? awayObj : (awayObj.name || awayObj || 'Unknown');
+                    const leagueObj = item.league || item.competition || {};
+                    const leagueName = typeof leagueObj === 'string' ? leagueObj : (leagueObj.name || 'Unknown');
                     
-                    if (home !== 'Unknown' && away !== 'Unknown') {
+                    if (home !== 'Unknown' && away !== 'Unknown' && typeof home === 'string' && typeof away === 'string') {
                         allMatches.push({
                             id: item.id || Math.random().toString(36).substr(2, 9),
                             homeTeam: home,
                             awayTeam: away,
-                            homeId: item.homeTeam?.id || item.home_id || 0,
-                            awayId: item.awayTeam?.id || item.away_id || 0,
+                            homeId: homeObj?.id || 0,
+                            awayId: awayObj?.id || 0,
                             league: leagueName,
                             status: item.status?.short || item.status || item.time || 'SCHEDULED',
-                            utcDate: item.date || item.time || today.toISOString(),
+                            utcDate: item.date || item.time || item.utcDate || today.toISOString(),
                             date: new Date().toLocaleString()
                         });
                     }
@@ -653,13 +662,23 @@ async function autoGeneratePredictions() {
                     'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
                     { params: { keyword: 'football' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com', 'Content-Type': 'application/json' } }
                 );
-                const data = response.data.response || [];
+                let data = [];
+                if (Array.isArray(response.data)) data = response.data;
+                else if (Array.isArray(response.data.response)) data = response.data.response;
+                else if (Array.isArray(response.data.data)) data = response.data.data;
+                else if (response.data.results) data = response.data.results;
+                
                 console.log(`📊 Livescore API returned ${data.length} items`);
                 for (const item of data) {
-                    const home = item.homeTeam?.name || item.homeTeam || item.home || 'Unknown';
-                    const away = item.awayTeam?.name || item.awayTeam || item.away || 'Unknown';
-                    if (home !== 'Unknown' && away !== 'Unknown') {
-                        allMatches.push({ id: item.id || Math.random().toString(36).substr(2, 9), homeTeam: home, awayTeam: away, homeId: item.homeTeam?.id || 0, awayId: item.awayTeam?.id || 0, league: item.league?.name || item.league || 'Unknown', status: item.status?.short || item.status || 'SCHEDULED', utcDate: item.date || today.toISOString(), date: new Date().toLocaleString() });
+                    const homeObj = item.homeTeam || item.home || item.home_team || {};
+                    const awayObj = item.awayTeam || item.away || item.away_team || {};
+                    const home = typeof homeObj === 'string' ? homeObj : (homeObj.name || homeObj || 'Unknown');
+                    const away = typeof awayObj === 'string' ? awayObj : (awayObj.name || awayObj || 'Unknown');
+                    const leagueObj = item.league || item.competition || {};
+                    const leagueName = typeof leagueObj === 'string' ? leagueObj : (leagueObj.name || 'Unknown');
+                    
+                    if (home !== 'Unknown' && away !== 'Unknown' && typeof home === 'string' && typeof away === 'string') {
+                        allMatches.push({ id: item.id || Math.random().toString(36).substr(2, 9), homeTeam: home, awayTeam: away, homeId: homeObj?.id || 0, awayId: awayObj?.id || 0, league: leagueName, status: item.status?.short || item.status || 'SCHEDULED', utcDate: item.date || today.toISOString(), date: new Date().toLocaleString() });
                     }
                 }
             } catch (e) { console.log(`Livescore API Error: ${e.message}`); }
