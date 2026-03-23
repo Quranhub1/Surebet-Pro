@@ -60,11 +60,9 @@ function saveCachedFixtures(matches) {
     }
 }
 
-// Check if cache is still valid (less than 1 hour old)
+// Check if cache is still valid (always return false to disable cache)
 function isCacheValid() {
-    if (!fixturesCache.lastFetch) return false;
-    const hoursDiff = (Date.now() - new Date(fixturesCache.lastFetch).getTime()) / (1000 * 60 * 60);
-    return hoursDiff < 1;  // Cache valid for 1 hour (matches auto-generation interval)
+    return false;  // Disabled - always fetch fresh data
 }
 
 // Load cached fixtures on startup
@@ -394,129 +392,118 @@ app.post('/api/start-predictions', async (req, res) => {
         console.log('RAPIDAPI_KEY:', !!process.env.RAPIDAPI_KEY);
         console.log('FOOTBALL_DATA_API_KEY:', !!process.env.FOOTBALL_DATA_API_KEY);
         
-        // Check cache first
-        if (isCacheValid() && fixturesCache.data.length > 0) {
-            console.log(`📦 Using cached fixtures (${fixturesCache.data.length} matches)`);
-            allMatches.push(...fixturesCache.data);
-        } else {
-            // Fetch fresh data from APIs
-            console.log('🔄 Cache invalid or empty, fetching fresh data...');
+        // Always fetch fresh data (no cache)
+        console.log('🔄 Fetching fresh data from APIs...');
+        
+        // PRIMARY: Free Livescore API (RapidAPI) - more matches worldwide
+        if (process.env.RAPIDAPI_KEY) {
+            console.log('Using Free Livescore API (PRIMARY)...');
             
-            // PRIMARY: Free Livescore API (RapidAPI) - more matches worldwide
-            if (process.env.RAPIDAPI_KEY) {
-                console.log('Using Free Livescore API (PRIMARY)...');
-                
-                try {
-                    const response = await axios.get(
-                        'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
-                        {
-                            params: { keyword: 'football' },
-                            headers: { 
-                                'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
-                                'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com',
-                                'Content-Type': 'application/json'
-                            }
-                        }
-                    );
-                    
-                    const data = response.data.response || [];
-                    console.log(`Livescore API returned: ${data.length} items`);
-                    
-                    for (const item of data) {
-                        if (item.homeTeam && item.awayTeam) {
-                            allMatches.push({
-                                id: item.id || Math.random(),
-                                homeTeam: item.homeTeam.name || item.homeTeam || 'Unknown',
-                                awayTeam: item.awayTeam.name || item.awayTeam || 'Unknown',
-                                homeId: item.homeTeam.id || 0,
-                                awayId: item.awayTeam.id || 0,
-                                league: item.league?.name || item.league || 'Unknown',
-                                status: item.status?.short || item.status || 'SCHEDULED',
-                                utcDate: item.date || today.toISOString(),
-                                date: new Date().toLocaleString()
-                            });
+            try {
+                const response = await axios.get(
+                    'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
+                    {
+                        params: { keyword: 'football' },
+                        headers: { 
+                            'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
+                            'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com',
+                            'Content-Type': 'application/json'
                         }
                     }
-                    console.log(`Parsed ${allMatches.length} matches from Livescore`);
-                } catch (e) {
-                    console.log(`Livescore API Error: ${e.response?.status || e.message}`);
-                }
-            }
-            
-            // SECONDARY: Add matches from Livescore API
-            if (process.env.LIVESCORE_API_KEY && process.env.LIVESCORE_API_SECRET && allMatches.length < 100) {
-                console.log('Adding matches from Livescore API...');
+                );
                 
-                try {
-                    const response = await axios.get(
-                        'https://livescore-api.com/api-client/users/pair.json',
-                        {
-                            params: {
-                                key: process.env.LIVESCORE_API_KEY,
-                                secret: process.env.LIVESCORE_API_SECRET
-                            }
-                        }
-                    );
-                    
-                    const data = response.data;
-                    
-                    if (data.matches) {
-                        const matches = data.matches.map(m => ({
-                            id: m.id || Math.random(),
-                            homeTeam: m.home || m.home_team || 'Unknown',
-                            awayTeam: m.away || m.away_team || 'Unknown',
-                            homeId: 0,
-                            awayId: 0,
-                            league: m.league || m.competition || 'Unknown',
-                            status: m.status || 'SCHEDULED',
-                            utcDate: m.time || m.date || today.toISOString(),
+                const data = response.data.response || [];
+                console.log(`Livescore API returned: ${data.length} items`);
+                
+                for (const item of data) {
+                    if (item.homeTeam && item.awayTeam) {
+                        allMatches.push({
+                            id: item.id || Math.random(),
+                            homeTeam: item.homeTeam.name || item.homeTeam || 'Unknown',
+                            awayTeam: item.awayTeam.name || item.awayTeam || 'Unknown',
+                            homeId: item.homeTeam.id || 0,
+                            awayId: item.awayTeam.id || 0,
+                            league: item.league?.name || item.league || 'Unknown',
+                            status: item.status?.short || item.status || 'SCHEDULED',
+                            utcDate: item.date || today.toISOString(),
                             date: new Date().toLocaleString()
-                        }));
-                        
-                        allMatches.push(...matches);
-                        console.log(`Livescore API: ${matches.length} matches`);
+                        });
                     }
-                } catch (e) {
-                    console.log(`Livescore API Error: ${e.response?.status || e.message}`);
                 }
+                console.log(`Parsed ${allMatches.length} matches from Livescore`);
+            } catch (e) {
+                console.log(`Livescore API Error: ${e.response?.status || e.message}`);
             }
+        }
+        
+        // SECONDARY: Add matches from Livescore API
+        if (process.env.LIVESCORE_API_KEY && process.env.LIVESCORE_API_SECRET && allMatches.length < 100) {
+            console.log('Adding matches from Livescore API...');
             
-            // TERTIARY: Add matches from Football Data API (fallback)
-            if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 50) {
-                console.log('Adding matches from Football Data API (fallback)...');
+            try {
+                const response = await axios.get(
+                    'https://livescore-api.com/api-client/users/pair.json',
+                    {
+                        params: {
+                            key: process.env.LIVESCORE_API_KEY,
+                            secret: process.env.LIVESCORE_API_SECRET
+                        }
+                    }
+                );
                 
-                for (let i = 0; i < 7; i++) {
-                    const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
-                    try {
-                        const response = await axios.get(
-                            `https://api.football-data.org/v4/matches?date=${dateStr}`,
-                            { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
-                        );
-                        
-                        const newMatches = (response.data.matches || []).map(m => ({
-                            id: m.id,
-                            homeTeam: m.homeTeam.name,
-                            awayTeam: m.awayTeam.name,
-                            homeId: m.homeTeam.id,
-                            awayId: m.awayTeam.id,
-                            league: m.competition.name,
-                            status: m.status,
-                            utcDate: m.utcDate,
-                            date: new Date(m.utcDate).toLocaleString()
-                        }));
-                        
-                        allMatches.push(...newMatches);
-                        console.log(`Football Data ${dateStr}: ${newMatches.length} matches`);
-                    } catch (e) {
-                        console.log(`Football Data ${dateStr}: Error`);
-                    }
-                    await new Promise(r => setTimeout(r, 1000));
+                const data = response.data;
+                
+                if (data.matches) {
+                    const matches = data.matches.map(m => ({
+                        id: m.id || Math.random(),
+                        homeTeam: m.home || m.home_team || 'Unknown',
+                        awayTeam: m.away || m.away_team || 'Unknown',
+                        homeId: 0,
+                        awayId: 0,
+                        league: m.league || m.competition || 'Unknown',
+                        status: m.status || 'SCHEDULED',
+                        utcDate: m.time || m.date || today.toISOString(),
+                        date: new Date().toLocaleString()
+                    }));
+                    
+                    allMatches.push(...matches);
+                    console.log(`Livescore API: ${matches.length} matches`);
                 }
+            } catch (e) {
+                console.log(`Livescore API Error: ${e.response?.status || e.message}`);
             }
+        }
+        
+        // TERTIARY: Add matches from Football Data API (fallback)
+        if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 50) {
+            console.log('Adding matches from Football Data API (fallback)...');
             
-            // Save to cache for future use
-            if (allMatches.length > 0) {
-                saveCachedFixtures(allMatches);
+            for (let i = 0; i < 7; i++) {
+                const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
+                try {
+                    const response = await axios.get(
+                        `https://api.football-data.org/v4/matches?date=${dateStr}`,
+                        { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                    );
+                    
+                    const newMatches = (response.data.matches || []).map(m => ({
+                        id: m.id,
+                        homeTeam: m.homeTeam.name,
+                        awayTeam: m.awayTeam.name,
+                        homeId: m.homeTeam.id,
+                        awayId: m.awayTeam.id,
+                        league: m.competition.name,
+                        status: m.status,
+                        utcDate: m.utcDate,
+                        date: new Date(m.utcDate).toLocaleString()
+                    }));
+                    
+                    allMatches.push(...newMatches);
+                    console.log(`Football Data ${dateStr}: ${newMatches.length} matches`);
+                } catch (e) {
+                    console.log(`Football Data ${dateStr}: Error`);
+                }
+                await new Promise(r => setTimeout(r, 1000));
             }
         }
         
