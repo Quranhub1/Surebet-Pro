@@ -470,7 +470,7 @@ app.post('/api/start-predictions', async (req, res) => {
                     });
                 }
             } catch (e) {
-                console.log(`API-Football Error: ${e.response?.status || e.message}`);
+                console.log(`API-Football Error: ${e.response?.status} - ${e.response?.statusText || e.message}`);
             }
         }
         
@@ -500,7 +500,7 @@ app.post('/api/start-predictions', async (req, res) => {
                     }
                 }
             } catch (e) {
-                console.log(`FlashScore API Error: ${e.response?.status || e.message}`);
+                console.log(`FlashScore API Error: ${e.response?.status} - ${e.response?.statusText || e.message}`);
             }
         }
         
@@ -569,7 +569,7 @@ app.post('/api/start-predictions', async (req, res) => {
                 allMatches.push(...newMatches);
                 console.log(`Football Data: ${newMatches.length} matches`);
             } catch (e) {
-                console.log(`Football Data API Error: ${e.message}`);
+                console.log(`Football Data API Error: ${e.response?.status} - ${e.response?.statusText} - ${e.message}`);
             }
             
             // Also try with date filter (always)
@@ -627,7 +627,7 @@ app.post('/api/start-predictions', async (req, res) => {
                 }
                 console.log(`ESPN leagues: ${allMatches.length} matches`);
             } catch (e) {
-                console.log(`ESPN API Error: ${e.message}`);
+                console.log(`ESPN API Error: ${e.response?.status} - ${e.response?.statusText || e.message}`);
             }
         }
         
