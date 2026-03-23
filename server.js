@@ -60,11 +60,11 @@ function saveCachedFixtures(matches) {
     }
 }
 
-// Check if cache is still valid (less than 6 hours old)
+// Check if cache is still valid (less than 1 hour old)
 function isCacheValid() {
     if (!fixturesCache.lastFetch) return false;
     const hoursDiff = (Date.now() - new Date(fixturesCache.lastFetch).getTime()) / (1000 * 60 * 60);
-    return hoursDiff < 6;
+    return hoursDiff < 1;  // Cache valid for 1 hour (matches auto-generation interval)
 }
 
 // Load cached fixtures on startup
@@ -627,6 +627,99 @@ app.get('/api/football-data/matches', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch matches.' }); 
     }
 });
+
+// Auto-generate predictions every 1 hour
+const AUTO_GENERATE_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
+
+// Flag to prevent overlapping auto-generations
+let autoGenerateInProgress = false;
+
+async function autoGeneratePredictions() {
+    if (autoGenerateInProgress) {
+        console.log('⏳ Auto-generation skipped - previous generation still in progress');
+        return;
+    }
+    
+    if (processingStatus.isProcessing) {
+        console.log('⏳ Auto-generation skipped - manual generation in progress');
+        return;
+    }
+    
+    console.log(`\n⏰ Auto-generation triggered (every ${AUTO_GENERATE_INTERVAL/1000/60} hour)`);
+    autoGenerateInProgress = true;
+    
+    try {
+        const allMatches = [];
+        const today = new Date();
+        
+        // Check cache first
+        if (isCacheValid() && fixturesCache.data.length > 0) {
+            console.log(`📦 Using cached fixtures (${fixturesCache.data.length} matches)`);
+            allMatches.push(...fixturesCache.data);
+        } else {
+            // Fetch fresh data (same logic as /api/start-predictions)
+            console.log('🔄 Cache invalid or empty, fetching fresh data...');
+            
+            if (process.env.RAPIDAPI_KEY) {
+                try {
+                    const response = await axios.get(
+                        'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
+                        { params: { keyword: 'football' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com', 'Content-Type': 'application/json' } }
+                    );
+                    const data = response.data.response || [];
+                    for (const item of data) {
+                        if (item.homeTeam && item.awayTeam) {
+                            allMatches.push({ id: item.id || Math.random(), homeTeam: item.homeTeam.name || item.homeTeam, awayTeam: item.awayTeam.name || item.awayTeam, homeId: item.homeTeam.id || 0, awayId: item.homeTeam.id || 0, league: item.league?.name || item.league || 'Unknown', status: item.status?.short || item.status || 'SCHEDULED', utcDate: item.date || today.toISOString(), date: new Date().toLocaleString() });
+                        }
+                    }
+                } catch (e) { console.log(`Livescore API Error: ${e.message}`); }
+            }
+            
+            if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 50) {
+                for (let i = 0; i < 7; i++) {
+                    const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
+                    try {
+                        const response = await axios.get(`https://api.football-data.org/v4/matches?date=${dateStr}`, { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } });
+                        const newMatches = (response.data.matches || []).map(m => ({ id: m.id, homeTeam: m.homeTeam.name, awayTeam: m.awayTeam.name, homeId: m.homeTeam.id, awayId: m.awayTeam.id, league: m.competition.name, status: m.status, utcDate: m.utcDate, date: new Date(m.utcDate).toLocaleString() }));
+                        allMatches.push(...newMatches);
+                    } catch (e) { console.log(`Football Data ${dateStr}: Error`); }
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+            
+            if (allMatches.length > 0) saveCachedFixtures(allMatches);
+        }
+        
+        // Remove duplicates
+        const unique = [];
+        const seen = new Set();
+        for (const m of allMatches) {
+            if (!seen.has(m.id)) { seen.add(m.id); unique.push(m); }
+        }
+        const matches = unique.slice(0, 200);
+        
+        if (matches.length > 0) {
+            predictionsCache = {};
+            processingStatus = { total: matches.length, processed: 0, isProcessing: true };
+            processBatch(matches, 0);
+            console.log('✅ Auto-generation started');
+        } else {
+            console.log('⚠️ No matches found for auto-generation');
+        }
+    } catch (e) {
+        console.error('❌ Auto-generation error:', e.message);
+    } finally {
+        autoGenerateInProgress = false;
+    }
+}
+
+// Start auto-generation after 1 hour, then repeat every hour
+setTimeout(() => {
+    autoGeneratePredictions();
+    setInterval(autoGeneratePredictions, AUTO_GENERATE_INTERVAL);
+}, AUTO_GENERATE_INTERVAL);
+
+console.log(`⏰ Auto-generation scheduled: First run in ${AUTO_GENERATE_INTERVAL/1000/60} hour, then every hour`);
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🚀 JOESBET Hub live on ${PORT}`));
