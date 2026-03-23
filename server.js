@@ -395,8 +395,8 @@ app.post('/api/start-predictions', async (req, res) => {
         // Always fetch fresh data (no cache)
         console.log('🔄 Fetching fresh data from APIs...');
         
-        // Try free WorldFootball API
-        if (allMatches.length < 50) {
+        // Try free WorldFootball API (always try)
+        if (true) {
             console.log('Trying WorldFootball API...');
             try {
                 const response = await axios.get('https://www.worldfootball.net/api_val.php?apiuebersicht=soccer');
@@ -406,8 +406,8 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Try API-Football (free tier)
-        if (allMatches.length < 50 && process.env.RAPIDAPI_KEY) {
+        // Try API-Football (always try)
+        if (process.env.RAPIDAPI_KEY) {
             console.log('Trying API-Football via RapidAPI...');
             try {
                 const response = await axios.get(
@@ -437,8 +437,8 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Also try FlashScore API alternative via RapidAPI
-        if (process.env.RAPIDAPI_KEY && allMatches.length < 20) {
+        // Also try FlashScore API (always, no length restriction)
+        if (process.env.RAPIDAPI_KEY) {
             console.log('Trying FlashScore API...');
             try {
                 const response = await axios.get(
@@ -467,8 +467,8 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // SECONDARY: Add matches from Livescore API
-        if (process.env.LIVESCORE_API_KEY && process.env.LIVESCORE_API_SECRET && allMatches.length < 100) {
+        // SECONDARY: Add matches from Livescore API (always try)
+        if (process.env.LIVESCORE_API_KEY && process.env.LIVESCORE_API_SECRET) {
             console.log('Adding matches from Livescore API...');
             
             try {
@@ -505,8 +505,8 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // SECONDARY: Add matches from Football Data API (fetch all available)
-        if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 100) {
+        // SECONDARY: Add matches from Football Data API (always try)
+        if (process.env.FOOTBALL_DATA_API_KEY) {
             console.log('Adding matches from Football Data API...');
             
             try {
@@ -535,8 +535,8 @@ app.post('/api/start-predictions', async (req, res) => {
                 console.log(`Football Data API Error: ${e.message}`);
             }
             
-            // Also try with date filter
-            if (allMatches.length < 20) {
+            // Also try with date filter (always)
+            if (true) {
                 const dateStr = formatDate(today);
                 try {
                     const response = await axios.get(
@@ -552,8 +552,8 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Try ESPN API with different endpoints
-        if (allMatches.length < 20) {
+        // Try ESPN API with different endpoints (always try)
+        if (true) {
             console.log('Trying ESPN API v2...');
             try {
                 const endpoints = [
@@ -793,8 +793,8 @@ async function autoGeneratePredictions() {
             } catch (e) { console.log(`Livescore API Error: ${e.message}`); }
         }
         
-        // Try FlashScore API if no matches
-        if (process.env.RAPIDAPI_KEY && allMatches.length < 20) {
+        // Try FlashScore API (always try)
+        if (process.env.RAPIDAPI_KEY) {
             console.log('📡 Trying FlashScore API...');
             try {
                 const response = await axios.get('https://flashscore-api.p.rapidapi.com/v1/events/live', { params: { sport_id: '1' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'flashscore-api.p.rapidapi.com' } });
@@ -817,7 +817,7 @@ async function autoGeneratePredictions() {
                 console.log(`📊 Football Data: ${newMatches.length} matches`);
             } catch (e) { console.log(`Football Data API Error: ${e.message}`); }
             
-            if (allMatches.length < 50) {
+            if (true) {
                 for (let i = 0; i < 3; i++) {
                     const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
                     try {
