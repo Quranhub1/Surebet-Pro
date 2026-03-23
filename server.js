@@ -638,8 +638,21 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        const matches = unique.slice(0, 200);
-        console.log(`Total unique: ${matches.length} matches`);
+        // Filter to only show upcoming/scheduled matches (not completed ones)
+        const now = new Date();
+        const upcomingMatches = unique.filter(m => {
+            const matchTime = new Date(m.utcDate);
+            // Show matches that are scheduled or live (not completed)
+            const status = String(m.status).toUpperCase();
+            if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
+            if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
+            if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
+            // Show matches that haven't started yet
+            return matchTime >= now || m.status === 'SCHEDULED' || m.status === 'Timed';
+        });
+        
+        const matches = upcomingMatches.slice(0, 200);
+        console.log(`Total unique: ${matches.length} matches (filtered from ${unique.length})`);
         
         // No sample matches - only real data
         if (matches.length === 0) {
@@ -841,7 +854,20 @@ async function autoGeneratePredictions() {
         for (const m of allMatches) {
             if (!seen.has(m.id)) { seen.add(m.id); unique.push(m); }
         }
-        const matches = unique.slice(0, 200);
+        
+        // Filter to only show upcoming/scheduled matches
+        const now = new Date();
+        const upcomingMatches = unique.filter(m => {
+            const matchTime = new Date(m.utcDate);
+            const status = String(m.status).toUpperCase();
+            if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
+            if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
+            if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
+            return matchTime >= now || m.status === 'SCHEDULED' || m.status === 'Timed';
+        });
+        
+        const matches = upcomingMatches.slice(0, 200);
+        console.log(`Total unique: ${matches.length} matches (filtered from ${unique.length})`);
         
         if (matches.length > 0) {
             predictionsCache = {};
