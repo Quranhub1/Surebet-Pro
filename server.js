@@ -395,70 +395,45 @@ app.post('/api/start-predictions', async (req, res) => {
         // Always fetch fresh data (no cache)
         console.log('🔄 Fetching fresh data from APIs...');
         
-        // PRIMARY: Free Livescore API (RapidAPI) - more matches worldwide
-        if (process.env.RAPIDAPI_KEY) {
-            console.log('Using Free Livescore API (PRIMARY)...');
-            
+        // Try free WorldFootball API
+        if (allMatches.length < 50) {
+            console.log('Trying WorldFootball API...');
+            try {
+                const response = await axios.get('https://www.worldfootball.net/api_val.php?apiuebersicht=soccer');
+                console.log(`WorldFootball response: ${response.status}`);
+            } catch (e) {
+                console.log(`WorldFootball Error: ${e.message}`);
+            }
+        }
+        
+        // Try API-Football (free tier)
+        if (allMatches.length < 50 && process.env.RAPIDAPI_KEY) {
+            console.log('Trying API-Football via RapidAPI...');
             try {
                 const response = await axios.get(
-                    'https://free-livescore-api.p.rapidapi.com/v2/livescore',
+                    'https://api-football-v1.p.rapidapi.com/v3/fixtures',
                     {
-                        params: { c: 'world' },
-                        headers: { 
-                            'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
-                            'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com',
-                            'Content-Type': 'application/json'
-                        }
+                        params: { date: formatDate(today), league: '39', season: '2024' },
+                        headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'api-football-v1.p.rapidapi.com' }
                     }
                 );
-                
-                // Handle various response formats - look for fixtures/matches in response
-                let data = [];
-                if (Array.isArray(response.data)) data = response.data;
-                else if (response.data?.fixtures) data = response.data.fixtures;
-                else if (response.data?.data?.fixtures) data = response.data.data.fixtures;
-                else if (Array.isArray(response.data?.response)) data = response.data.response;
-                else if (Array.isArray(response.data?.response?.fixtures)) data = response.data.response.fixtures;
-                
-                console.log(`Livescore API returned: ${data.length || 0} items`);
-                
-                if (data.length === 0) {
-                    // Try alternative endpoint
-                    console.log('Trying alternative endpoint...');
-                    const altResponse = await axios.get(
-                        'https://free-livescore-api.p.rapidapi.com/livescore-get-all',
-                        { params: { c: 'all' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com', 'Content-Type': 'application/json' } }
-                    );
-                    if (Array.isArray(altResponse.data)) data = altResponse.data;
-                    else if (altResponse.data?.fixtures) data = altResponse.data.fixtures;
-                    console.log(`Livescore Alt returned: ${data.length || 0} items`);
+                const fixtures = response.data?.response || [];
+                console.log(`API-Football: ${fixtures.length} fixtures`);
+                for (const f of fixtures) {
+                    allMatches.push({
+                        id: f.fixture?.id || Math.random().toString(36).substr(2, 9),
+                        homeTeam: f.teams?.home?.name || 'Unknown',
+                        awayTeam: f.teams?.away?.name || 'Unknown',
+                        homeId: f.teams?.home?.id || 0,
+                        awayId: f.teams?.away?.id || 0,
+                        league: f.league?.name || 'Unknown',
+                        status: f.fixture?.status?.short || 'SCHEDULED',
+                        utcDate: f.fixture?.date || today.toISOString(),
+                        date: new Date().toLocaleString()
+                    });
                 }
-                
-                for (const item of data) {
-                    const homeObj = item.homeTeam || item.home || item.home_team || {};
-                    const awayObj = item.awayTeam || item.away || item.away_team || {};
-                    const home = typeof homeObj === 'string' ? homeObj : (homeObj.name || homeObj || 'Unknown');
-                    const away = typeof awayObj === 'string' ? awayObj : (awayObj.name || awayObj || 'Unknown');
-                    const leagueObj = item.league || item.competition || {};
-                    const leagueName = typeof leagueObj === 'string' ? leagueObj : (leagueObj.name || 'Unknown');
-                    
-                    if (home !== 'Unknown' && away !== 'Unknown' && typeof home === 'string' && typeof away === 'string') {
-                        allMatches.push({
-                            id: item.id || Math.random().toString(36).substr(2, 9),
-                            homeTeam: home,
-                            awayTeam: away,
-                            homeId: homeObj?.id || 0,
-                            awayId: awayObj?.id || 0,
-                            league: leagueName,
-                            status: item.status?.short || item.status || item.time || 'SCHEDULED',
-                            utcDate: item.date || item.time || item.utcDate || today.toISOString(),
-                            date: new Date().toLocaleString()
-                        });
-                    }
-                }
-                console.log(`Parsed ${allMatches.length} matches from Livescore`);
             } catch (e) {
-                console.log(`Livescore API Error: ${e.response?.status || e.message}`);
+                console.log(`API-Football Error: ${e.response?.status || e.message}`);
             }
         }
         
@@ -648,30 +623,9 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Add sample matches if no data available
+        // No sample matches - only real API data
         if (allMatches.length === 0) {
-            console.log('Adding sample matches (no API data available)...');
-            const sampleMatches = [
-                { home: 'Arsenal', away: 'Liverpool', league: 'Premier League' },
-                { home: 'Real Madrid', away: 'Barcelona', league: 'La Liga' },
-                { home: 'Bayern Munich', away: 'Dortmund', league: 'Bundesliga' },
-                { home: 'PSG', away: 'Marseille', league: 'Ligue 1' },
-                { home: 'Juventus', away: 'Inter Milan', league: 'Serie A' }
-            ];
-            for (const m of sampleMatches) {
-                allMatches.push({
-                    id: Math.random().toString(36).substr(2, 9),
-                    homeTeam: m.home,
-                    awayTeam: m.away,
-                    homeId: 0,
-                    awayId: 0,
-                    league: m.league,
-                    status: 'SCHEDULED',
-                    utcDate: today.toISOString(),
-                    date: new Date().toLocaleString()
-                });
-            }
-            console.log(`Added ${allMatches.length} sample matches`);
+            console.log('⚠️ No matches found from any API');
         }
         
         // Remove duplicates
@@ -687,36 +641,9 @@ app.post('/api/start-predictions', async (req, res) => {
         const matches = unique.slice(0, 200);
         console.log(`Total unique: ${matches.length} matches`);
         
-        // Add sample matches if no data available
+        // No sample matches - only real data
         if (matches.length === 0) {
-            console.log('Adding sample matches (no API data)...');
-            const sampleMatches = [
-                { home: 'Arsenal', away: 'Liverpool', league: 'Premier League' },
-                { home: 'Real Madrid', away: 'Barcelona', league: 'La Liga' },
-                { home: 'Bayern Munich', away: 'Dortmund', league: 'Bundesliga' },
-                { home: 'PSG', away: 'Marseille', league: 'Ligue 1' },
-                { home: 'Juventus', away: 'Inter Milan', league: 'Serie A' }
-            ];
-            for (const m of sampleMatches) {
-                allMatches.push({
-                    id: Math.random().toString(36).substr(2, 9),
-                    homeTeam: m.home,
-                    awayTeam: m.away,
-                    homeId: 0,
-                    awayId: 0,
-                    league: m.league,
-                    status: 'SCHEDULED',
-                    utcDate: today.toISOString(),
-                    date: new Date().toLocaleString()
-                });
-            }
-            const finalMatches = [];
-            const seen = new Set();
-            for (const m of allMatches) {
-                if (!seen.has(m.id)) { seen.add(m.id); finalMatches.push(m); }
-            }
-            console.log(`Added ${finalMatches.length} sample matches`);
-            matches.push(...finalMatches.slice(0, 200));
+            return res.json({ error: 'No matches found. No live matches available right now. Try again later.' });
         }
         
         predictionsCache = {};
