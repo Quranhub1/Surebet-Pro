@@ -398,31 +398,35 @@ app.post('/api/start-predictions', async (req, res) => {
         // PRIMARY: Football Data API (user's primary choice)
         if (process.env.FOOTBALL_DATA_API_KEY) {
             console.log('Fetching from Football Data API (PRIMARY)...');
-            try {
-                const response = await axios.get(
-                    'https://api.football-data.org/v4/matches',
-                    { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
-                );
-                console.log(`Football Data API: ${response.data.count || 0} matches`);
-                const newMatches = (response.data.matches || []).map(m => ({
-                    id: m.id,
-                    homeTeam: m.homeTeam?.name || 'Unknown',
-                    awayTeam: m.awayTeam?.name || 'Unknown',
-                    homeId: m.homeTeam?.id || 0,
-                    awayId: m.awayTeam?.id || 0,
-                    league: m.competition?.name || 'Unknown',
-                    status: m.status,
-                    utcDate: m.utcDate,
-                    date: new Date(m.utcDate).toLocaleString()
-                })).filter(m => m.homeTeam !== 'Unknown');
-                allMatches.push(...newMatches);
-                console.log(`Football Data: ${newMatches.length} matches`);
-            } catch (e) {
-                console.log(`Football Data API Error: ${e.message}`);
+            
+            // Try different timeframes
+            const timeframes = ['PAST', 'NEXT_7_DAYS', 'NEXT_1_DAY'];
+            for (const tf of timeframes) {
+                try {
+                    const response = await axios.get(
+                        `https://api.football-data.org/v4/matches?dateFrom=${today.toISOString().split('T')[0]}&dateTo=${formatDate(new Date(today.getTime() + 7*24*60*60*1000))}`,
+                        { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                    );
+                    console.log(`Football Data ${tf}: ${response.data.count || 0} matches`);
+                    const newMatches = (response.data.matches || []).map(m => ({
+                        id: m.id,
+                        homeTeam: m.homeTeam?.name || 'Unknown',
+                        awayTeam: m.awayTeam?.name || 'Unknown',
+                        homeId: m.homeTeam?.id || 0,
+                        awayId: m.awayTeam?.id || 0,
+                        league: m.competition?.name || 'Unknown',
+                        status: m.status,
+                        utcDate: m.utcDate,
+                        date: new Date(m.utcDate).toLocaleString()
+                    })).filter(m => m.homeTeam !== 'Unknown');
+                    allMatches.push(...newMatches);
+                } catch (e) {
+                    console.log(`Football Data ${tf} Error: ${e.message}`);
+                }
             }
             
-            // Also try date-specific queries
-            for (let i = 0; i < 3; i++) {
+            // Also try date-specific queries for today and tomorrow
+            for (let i = 0; i < 2; i++) {
                 const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
                 try {
                     const response = await axios.get(
