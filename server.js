@@ -640,6 +640,7 @@ app.post('/api/start-predictions', async (req, res) => {
         
         // Filter to only show upcoming/scheduled matches (not completed ones)
         const now = new Date();
+        const todayStart = today;  // Use existing today variable
         const upcomingMatches = unique.filter(m => {
             const matchTime = new Date(m.utcDate);
             // Show matches that are scheduled or live (not completed)
@@ -647,6 +648,9 @@ app.post('/api/start-predictions', async (req, res) => {
             if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
             if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
             if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
+            // Filter out matches from yesterday
+            const matchDate = new Date(matchTime.getFullYear(), matchTime.getMonth(), matchTime.getDate());
+            if (matchDate < todayStart) return false;
             // Show matches that haven't started yet
             return matchTime >= now || m.status === 'SCHEDULED' || m.status === 'Timed';
         });
@@ -857,12 +861,16 @@ async function autoGeneratePredictions() {
         
         // Filter to only show upcoming/scheduled matches
         const now = new Date();
+        const todayStart = today;  // Use existing today variable
         const upcomingMatches = unique.filter(m => {
             const matchTime = new Date(m.utcDate);
             const status = String(m.status).toUpperCase();
             if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
             if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
             if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
+            // Filter out matches from yesterday
+            const matchDate = new Date(matchTime.getFullYear(), matchTime.getMonth(), matchTime.getDate());
+            if (matchDate < todayStart) return false;
             return matchTime >= now || m.status === 'SCHEDULED' || m.status === 'Timed';
         });
         
