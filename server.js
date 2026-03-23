@@ -416,16 +416,21 @@ app.post('/api/start-predictions', async (req, res) => {
                 console.log(`Livescore API returned: ${data.length} items`);
                 
                 for (const item of data) {
-                    if (item.homeTeam && item.awayTeam) {
+                    // Handle different response formats
+                    const home = item.homeTeam?.name || item.homeTeam || item.home || 'Unknown';
+                    const away = item.awayTeam?.name || item.awayTeam || item.away || 'Unknown';
+                    const leagueName = item.league?.name || item.league || item.competition || 'Unknown';
+                    
+                    if (home !== 'Unknown' && away !== 'Unknown') {
                         allMatches.push({
-                            id: item.id || Math.random(),
-                            homeTeam: item.homeTeam.name || item.homeTeam || 'Unknown',
-                            awayTeam: item.awayTeam.name || item.awayTeam || 'Unknown',
-                            homeId: item.homeTeam.id || 0,
-                            awayId: item.awayTeam.id || 0,
-                            league: item.league?.name || item.league || 'Unknown',
-                            status: item.status?.short || item.status || 'SCHEDULED',
-                            utcDate: item.date || today.toISOString(),
+                            id: item.id || Math.random().toString(36).substr(2, 9),
+                            homeTeam: home,
+                            awayTeam: away,
+                            homeId: item.homeTeam?.id || item.home_id || 0,
+                            awayId: item.awayTeam?.id || item.away_id || 0,
+                            league: leagueName,
+                            status: item.status?.short || item.status || item.time || 'SCHEDULED',
+                            utcDate: item.date || item.time || today.toISOString(),
                             date: new Date().toLocaleString()
                         });
                     }
@@ -474,8 +479,8 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // TERTIARY: Add matches from Football Data API (fallback)
-        if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 50) {
+        // SECONDARY: Add matches from Football Data API
+        if (process.env.FOOTBALL_DATA_API_KEY && allMatches.length < 100) {
             console.log('Adding matches from Football Data API (fallback)...');
             
             for (let i = 0; i < 7; i++) {
@@ -632,7 +637,7 @@ async function autoGeneratePredictions() {
         return;
     }
     
-    console.log(`\n⏰ Auto-generation triggered (every ${AUTO_GENERATE_INTERVAL/1000/60} hour)`);
+    console.log(`\n⏰ Auto-generation triggered (every 1 hour)`);
     autoGenerateInProgress = true;
     
     try {
@@ -651,8 +656,10 @@ async function autoGeneratePredictions() {
                 const data = response.data.response || [];
                 console.log(`📊 Livescore API returned ${data.length} items`);
                 for (const item of data) {
-                    if (item.homeTeam && item.awayTeam) {
-                        allMatches.push({ id: item.id || Math.random(), homeTeam: item.homeTeam.name || item.homeTeam, awayTeam: item.awayTeam.name || item.awayTeam, homeId: item.homeTeam.id || 0, awayId: item.homeTeam.id || 0, league: item.league?.name || item.league || 'Unknown', status: item.status?.short || item.status || 'SCHEDULED', utcDate: item.date || today.toISOString(), date: new Date().toLocaleString() });
+                    const home = item.homeTeam?.name || item.homeTeam || item.home || 'Unknown';
+                    const away = item.awayTeam?.name || item.awayTeam || item.away || 'Unknown';
+                    if (home !== 'Unknown' && away !== 'Unknown') {
+                        allMatches.push({ id: item.id || Math.random().toString(36).substr(2, 9), homeTeam: home, awayTeam: away, homeId: item.homeTeam?.id || 0, awayId: item.awayTeam?.id || 0, league: item.league?.name || item.league || 'Unknown', status: item.status?.short || item.status || 'SCHEDULED', utcDate: item.date || today.toISOString(), date: new Date().toLocaleString() });
                     }
                 }
             } catch (e) { console.log(`Livescore API Error: ${e.message}`); }
@@ -705,7 +712,7 @@ setTimeout(() => {
     setInterval(autoGeneratePredictions, AUTO_GENERATE_INTERVAL);
 }, AUTO_GENERATE_INTERVAL);
 
-console.log(`⏰ Auto-generation scheduled: First run in ${AUTO_GENERATE_INTERVAL/1000/60} hour, then every hour`);
+console.log(`⏰ Auto-generation scheduled: First run in 1 hour, then every hour`);
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🚀 JOESBET Hub live on ${PORT}`));
