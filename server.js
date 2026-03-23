@@ -577,14 +577,71 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Try Scoreboard API as additional source
+        // Try ESPN API as additional source
         if (allMatches.length < 20) {
-            console.log('Trying Scoreboard API...');
+            console.log('Trying ESPN API...');
             try {
-                const response = await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/所有/teams');
-                console.log(`ESPN API response status: ${response.status}`);
+                const response = await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/_/league');
+                if (response.data && response.data.leagues) {
+                    for (const league of response.data.leagues) {
+                        const events = league.seasons?.[0]?.events || [];
+                        for (const event of events) {
+                            const competition = event.competitions?.[0];
+                            if (competition) {
+                                const home = competition.competitors?.find(c => c.homeAway === 'home');
+                                const away = competition.competitors?.find(c => c.homeAway === 'away');
+                                if (home?.team?.displayName && away?.team?.displayName) {
+                                    allMatches.push({
+                                        id: event.id || Math.random().toString(36).substr(2, 9),
+                                        homeTeam: home.team.displayName,
+                                        awayTeam: away.team.displayName,
+                                        homeId: home.team.id,
+                                        awayId: away.team.id,
+                                        league: league.abbreviations || 'Soccer',
+                                        status: competition.status?.type?.description || 'SCHEDULED',
+                                        utcDate: competition.date || today.toISOString(),
+                                        date: new Date().toLocaleString()
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    console.log(`ESPN API: ${allMatches.length} matches`);
+                }
             } catch (e) {
                 console.log(`ESPN API Error: ${e.message}`);
+            }
+        }
+        
+        // Try another ESPN endpoint for live games
+        if (allMatches.length < 20) {
+            console.log('Trying ESPN Live API...');
+            try {
+                const response = await axios.get('https://site.api.espn.com/apis/site/v2/sports/scoreboard/positions');
+                const sbData = response.data?.scoreboards?.boards || [];
+                for (const board of sbData) {
+                    for (const event of board.events || []) {
+                        const competition = event.competitions?.[0];
+                        const home = competition?.competitors?.find(c => c.homeAway === 'home');
+                        const away = competition?.competitors?.find(c => c.homeAway === 'away');
+                        if (home?.team?.displayName && away?.team?.displayName) {
+                            allMatches.push({
+                                id: event.id || Math.random().toString(36).substr(2, 9),
+                                homeTeam: home.team.displayName,
+                                awayTeam: away.team.displayName,
+                                homeId: home.team.id,
+                                awayId: away.team.id,
+                                league: board.league?.abbreviation || 'Soccer',
+                                status: competition?.status?.type?.description || 'LIVE',
+                                utcDate: event.date || today.toISOString(),
+                                date: new Date().toLocaleString()
+                            });
+                        }
+                    }
+                }
+                console.log(`ESPN Live: ${allMatches.length} matches`);
+            } catch (e) {
+                console.log(`ESPN Live Error: ${e.message}`);
             }
         }
         
