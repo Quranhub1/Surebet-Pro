@@ -671,22 +671,20 @@ app.post('/api/start-predictions', async (req, res) => {
             }
         }
         
-        // Filter to only show upcoming/scheduled matches (not completed ones)
+        // Filter to only show UPCOMING/future matches (not past games)
         const now = new Date();
         const upcomingMatches = unique.filter(m => {
-            const matchTime = new Date(m.utcDate);
-            const status = String(m.status).toUpperCase();
-            // Show LIVE matches
-            if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
-            // Hide FINISHED/COMPLETED matches
-            if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
-            // Hide POSTPONED/CANCELLED
+            const status = String(m.status || '').toUpperCase();
+            // Show LIVE/In-Play matches
+            if (status === 'LIVE' || status === 'IN_PLAY' || status === 'INPROGRESS') return true;
+            // Hide finished/completed/postponed/cancelled
+            if (status.includes('FINAL') || status.includes('FINISHED') || status.includes('COMPLETED')) return false;
             if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
-            // Show if no status (default to showing)
-            if (!status || status === 'UNKNOWN') return true;
-            // Show SCHEDULED or TIMED
-            if (m.status === 'SCHEDULED' || m.status === 'Timed') return true;
-            // Default: show
+            // For scheduled matches, check if the match is in the future
+            const matchTime = new Date(m.utcDate);
+            // If match time is in the future, show it
+            if (matchTime > now) return true;
+            // If no valid time or status, default to showing
             return true;
         });
         
@@ -894,20 +892,20 @@ async function autoGeneratePredictions() {
             if (!seen.has(m.id)) { seen.add(m.id); unique.push(m); }
         }
         
-        // Filter to only show upcoming/scheduled matches
+        // Filter to only show UPCOMING/future matches (not past games)
         const upcomingMatches = unique.filter(m => {
-            const status = String(m.status).toUpperCase();
-            // Show LIVE matches
-            if (status.includes('LIVE') || status.includes('IN_PLAY')) return true;
-            // Hide FINISHED/COMPLETED
-            if (status.includes('FINISHED') || status.includes('COMPLETED')) return false;
-            // Hide POSTPONED/CANCELLED
+            const status = String(m.status || '').toUpperCase();
+            // Show LIVE/In-Play matches
+            if (status === 'LIVE' || status === 'IN_PLAY' || status === 'INPROGRESS') return true;
+            // Hide finished/completed/postponed/cancelled
+            if (status.includes('FINAL') || status.includes('FINISHED') || status.includes('COMPLETED')) return false;
             if (status.includes('POSTPONED') || status.includes('CANCELLED')) return false;
-            // Show if no status
-            if (!status || status === 'UNKNOWN') return true;
-            // Show SCHEDULED or TIMED
-            if (m.status === 'SCHEDULED' || m.status === 'Timed') return true;
-            // Default: show
+            // For scheduled matches, check if the match is in the future
+            const matchTime = new Date(m.utcDate);
+            const now = new Date();
+            // If match time is in the future, show it
+            if (matchTime > now) return true;
+            // If no valid time or status, default to showing (some APIs don't provide good status)
             return true;
         });
         
