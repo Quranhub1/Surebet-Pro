@@ -535,25 +535,24 @@ app.post('/api/start-predictions', async (req, res) => {
             console.log('Adding matches from Football Data API...');
             
             try {
-                // Try to get today's matches first (free tier usually has this)
                 const response = await axios.get(
                     'https://api.football-data.org/v4/matches',
                     { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
                 );
                 
-                console.log(`Football Data API response: ${response.data.count || 0} matches`);
+                console.log(`Football Data API: ${response.data.count || 0} matches, comps: ${response.data.competitions?.length || 0}`);
                 
                 const newMatches = (response.data.matches || []).map(m => ({
                     id: m.id,
-                    homeTeam: m.homeTeam.name,
-                    awayTeam: m.awayTeam.name,
-                    homeId: m.homeTeam.id,
-                    awayId: m.awayTeam.id,
-                    league: m.competition.name,
+                    homeTeam: m.homeTeam?.name || 'Unknown',
+                    awayTeam: m.awayTeam?.name || 'Unknown',
+                    homeId: m.homeTeam?.id || 0,
+                    awayId: m.awayTeam?.id || 0,
+                    league: m.competition?.name || 'Unknown',
                     status: m.status,
                     utcDate: m.utcDate,
                     date: new Date(m.utcDate).toLocaleString()
-                }));
+                })).filter(m => m.homeTeam !== 'Unknown');
                 
                 allMatches.push(...newMatches);
                 console.log(`Football Data: ${newMatches.length} matches`);
@@ -561,35 +560,31 @@ app.post('/api/start-predictions', async (req, res) => {
                 console.log(`Football Data API Error: ${e.message}`);
             }
             
-            // Also try date range if still no matches
-            if (allMatches.length < 50) {
-                for (let i = 0; i < 3; i++) {
-                    const dateStr = formatDate(new Date(today.getTime() + i*24*60*60*1000));
-                    try {
-                        const response = await axios.get(
-                            `https://api.football-data.org/v4/matches?date=${dateStr}`,
-                            { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
-                        );
-                        
-                        const newMatches = (response.data.matches || []).map(m => ({
-                            id: m.id,
-                            homeTeam: m.homeTeam.name,
-                            awayTeam: m.awayTeam.name,
-                            homeId: m.homeTeam.id,
-                            awayId: m.awayTeam.id,
-                            league: m.competition.name,
-                            status: m.status,
-                            utcDate: m.utcDate,
-                            date: new Date(m.utcDate).toLocaleString()
-                        }));
-                        
-                        allMatches.push(...newMatches);
-                        console.log(`Football Data ${dateStr}: ${newMatches.length} matches`);
-                    } catch (e) {
-                        console.log(`Football Data ${dateStr}: Error`);
-                    }
-                    await new Promise(r => setTimeout(r, 500));
-                }
+            // Also try with date filter
+            if (allMatches.length < 20) {
+                const dateStr = formatDate(today);
+                try {
+                    const response = await axios.get(
+                        `https://api.football-data.org/v4/matches?date=${dateStr}`,
+                        { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } }
+                    );
+                    const newMatches = (response.data.matches || []).map(m => ({
+                        id: m.id, homeTeam: m.homeTeam?.name, awayTeam: m.awayTeam?.name, homeId: m.homeTeam?.id, awayId: m.awayTeam?.id, league: m.competition?.name, status: m.status, utcDate: m.utcDate, date: new Date(m.utcDate).toLocaleString()
+                    })).filter(m => m.homeTeam);
+                    allMatches.push(...newMatches);
+                    console.log(`Football Data ${dateStr}: ${newMatches.length} matches`);
+                } catch (e) { console.log(`Football Data ${dateStr}: Error`); }
+            }
+        }
+        
+        // Try Scoreboard API as additional source
+        if (allMatches.length < 20) {
+            console.log('Trying Scoreboard API...');
+            try {
+                const response = await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/所有/teams');
+                console.log(`ESPN API response status: ${response.status}`);
+            } catch (e) {
+                console.log(`ESPN API Error: ${e.message}`);
             }
         }
         
