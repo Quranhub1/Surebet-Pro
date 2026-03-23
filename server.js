@@ -401,9 +401,9 @@ app.post('/api/start-predictions', async (req, res) => {
             
             try {
                 const response = await axios.get(
-                    'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
+                    'https://free-livescore-api.p.rapidapi.com/v2/livescore',
                     {
-                        params: { keyword: 'football' },
+                        params: { c: 'world' },
                         headers: { 
                             'x-rapidapi-key': process.env.RAPIDAPI_KEY, 
                             'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com',
@@ -412,17 +412,29 @@ app.post('/api/start-predictions', async (req, res) => {
                     }
                 );
                 
-                // Handle various response formats
+                // Handle various response formats - look for fixtures/matches in response
                 let data = [];
                 if (Array.isArray(response.data)) data = response.data;
-                else if (Array.isArray(response.data.response)) data = response.data.response;
-                else if (Array.isArray(response.data.data)) data = response.data.data;
-                else if (response.data.results) data = response.data.results;
+                else if (response.data?.fixtures) data = response.data.fixtures;
+                else if (response.data?.data?.fixtures) data = response.data.data.fixtures;
+                else if (Array.isArray(response.data?.response)) data = response.data.response;
+                else if (Array.isArray(response.data?.response?.fixtures)) data = response.data.response.fixtures;
                 
-                console.log(`Livescore API returned: ${data.length} items`);
+                console.log(`Livescore API returned: ${data.length || 0} items`);
+                
+                if (data.length === 0) {
+                    // Try alternative endpoint
+                    console.log('Trying alternative endpoint...');
+                    const altResponse = await axios.get(
+                        'https://free-livescore-api.p.rapidapi.com/livescore-get-all',
+                        { params: { c: 'all' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com', 'Content-Type': 'application/json' } }
+                    );
+                    if (Array.isArray(altResponse.data)) data = altResponse.data;
+                    else if (altResponse.data?.fixtures) data = altResponse.data.fixtures;
+                    console.log(`Livescore Alt returned: ${data.length || 0} items`);
+                }
                 
                 for (const item of data) {
-                    // Handle nested and flat formats
                     const homeObj = item.homeTeam || item.home || item.home_team || {};
                     const awayObj = item.awayTeam || item.away || item.away_team || {};
                     const home = typeof homeObj === 'string' ? homeObj : (homeObj.name || homeObj || 'Unknown');
@@ -447,6 +459,36 @@ app.post('/api/start-predictions', async (req, res) => {
                 console.log(`Parsed ${allMatches.length} matches from Livescore`);
             } catch (e) {
                 console.log(`Livescore API Error: ${e.response?.status || e.message}`);
+            }
+        }
+        
+        // Also try FlashScore API alternative via RapidAPI
+        if (process.env.RAPIDAPI_KEY && allMatches.length < 20) {
+            console.log('Trying FlashScore API...');
+            try {
+                const response = await axios.get(
+                    'https://flashscore-api.p.rapidapi.com/v1/events/live',
+                    { params: { sport_id: '1' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'flashscore-api.p.rapidapi.com' } }
+                );
+                const fsData = response.data?.data || response.data || [];
+                console.log(`FlashScore returned: ${fsData.length || 0} items`);
+                for (const item of fsData) {
+                    if (item.home_name && item.away_name) {
+                        allMatches.push({
+                            id: item.id || Math.random().toString(36).substr(2, 9),
+                            homeTeam: item.home_name,
+                            awayTeam: item.away_name,
+                            homeId: 0,
+                            awayId: 0,
+                            league: item.tournament_name || 'Unknown',
+                            status: item.time || 'LIVE',
+                            utcDate: today.toISOString(),
+                            date: new Date().toLocaleString()
+                        });
+                    }
+                }
+            } catch (e) {
+                console.log(`FlashScore API Error: ${e.response?.status || e.message}`);
             }
         }
         
@@ -687,18 +729,19 @@ async function autoGeneratePredictions() {
         console.log('🔄 Fetching fresh match data for auto-generation...');
         
         if (process.env.RAPIDAPI_KEY) {
+            console.log('📡 Using Livescore API...');
             try {
                 const response = await axios.get(
-                    'https://free-livescore-api.p.rapidapi.com/livescore-get-search',
-                    { params: { keyword: 'football' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com', 'Content-Type': 'application/json' } }
+                    'https://free-livescore-api.p.rapidapi.com/v2/livescore',
+                    { params: { c: 'world' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'free-livescore-api.p.rapidapi.com', 'Content-Type': 'application/json' } }
                 );
                 let data = [];
                 if (Array.isArray(response.data)) data = response.data;
+                else if (response.data?.fixtures) data = response.data.fixtures;
+                else if (response.data?.data?.fixtures) data = response.data.data.fixtures;
                 else if (Array.isArray(response.data.response)) data = response.data.response;
-                else if (Array.isArray(response.data.data)) data = response.data.data;
-                else if (response.data.results) data = response.data.results;
                 
-                console.log(`📊 Livescore API returned ${data.length} items`);
+                console.log(`📊 Livescore API returned ${data.length || 0} items`);
                 for (const item of data) {
                     const homeObj = item.homeTeam || item.home || item.home_team || {};
                     const awayObj = item.awayTeam || item.away || item.away_team || {};
@@ -712,6 +755,21 @@ async function autoGeneratePredictions() {
                     }
                 }
             } catch (e) { console.log(`Livescore API Error: ${e.message}`); }
+        }
+        
+        // Try FlashScore API if no matches
+        if (process.env.RAPIDAPI_KEY && allMatches.length < 20) {
+            console.log('📡 Trying FlashScore API...');
+            try {
+                const response = await axios.get('https://flashscore-api.p.rapidapi.com/v1/events/live', { params: { sport_id: '1' }, headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'flashscore-api.p.rapidapi.com' } });
+                const fsData = response.data?.data || response.data || [];
+                console.log(`📊 FlashScore returned: ${fsData.length || 0} items`);
+                for (const item of fsData) {
+                    if (item.home_name && item.away_name) {
+                        allMatches.push({ id: item.id || Math.random().toString(36).substr(2, 9), homeTeam: item.home_name, awayTeam: item.away_name, homeId: 0, awayId: 0, league: item.tournament_name || 'Unknown', status: item.time || 'LIVE', utcDate: today.toISOString(), date: new Date().toLocaleString() });
+                    }
+                }
+            } catch (e) { console.log(`FlashScore API Error: ${e.message}`); }
         }
         
         // Also fetch from Football Data API
