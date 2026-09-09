@@ -30,7 +30,7 @@ services:
   - type: cron
     name: surebet-pro-automation
     runtime: node
-    schedule: "0 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: npm install
     startCommand: node scripts/automation-trigger.js
     envVars:
