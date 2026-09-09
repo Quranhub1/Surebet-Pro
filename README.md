@@ -1,256 +1,143 @@
-# SureBet Pro - Automated Sports Predictions
+# SureBet Pro — Football Forecasting Engine
 
-A professional betting prediction platform powered by AI ensemble models, featuring real-time football match data and comprehensive betting market predictions.
+SureBet Pro is a server-backed football forecasting application. It combines real fixture data, a transparent Poisson baseline, and independent AI forecasts into a validated ensemble. It also exposes market-value calculations when real decimal odds are supplied.
 
-## 🚀 Features
+> **Important:** a prediction is not a guaranteed bet. A positive-EV selection is different from a bookmaker arbitrage (surebet), which requires simultaneous prices from multiple bookmakers.
 
-- **AI-Powered Predictions**: Ensemble of multiple AI models for higher accuracy
-- **Comprehensive Betting Markets**:
-  - Match Result (1X2)
-  - Double Chance (1X, 2X, 12)
-  - Over/Under Goals (0.5, 1.5, 2.5, 3.5, 4.5)
-  - Both Teams To Score (BTTS)
-  - Draw No Bet (DNB)
-  - Asian Handicap
-  - Correct Score
-- **Real-time Match Data**: Integration with Football-Data.org API
-- **Professional UI**: Modern dark theme with responsive design
-- **Bet Slip Management**: Add, remove, and manage bets
-- **Prediction Explanations**: Detailed reasoning for each prediction
+## What changed in v2
 
-## 🛠️ Tech Stack
+- **True multi-model ensemble:** configured Gemini, Groq, DeepSeek and Z.ai models are queried independently and their probability distributions are weighted and averaged. One successful provider no longer hides the others.
+- **Probability-first output:** models return Home/Draw/Away probabilities instead of an invented confidence score. UI/API confidence is derived from model probability and inter-model agreement.
+- **Transparent statistical baseline:** a deterministic Poisson model remains available when AI providers fail. It is a baseline, not a claim of machine-learning accuracy.
+- **Real value calculation:** `/api/value` calculates implied probability, edge, expected value and no-vig market probability from actual decimal odds. The engine never fabricates bookmaker odds.
+- **Removed unreliable web scraping:** the old HTML-regex prediction scraping and random site confidence have been removed.
+- **Better data ingestion:** duplicate fixture requests were consolidated, fixture caching has a real TTL, and upcoming/finished filtering is explicit.
+- **Parallel inference:** independent model calls run concurrently, reducing the latency of the ensemble.
+- **Basic API protection:** API rate limiting is included to reduce accidental or abusive request floods.
+- **Regression tests:** core probability, ensemble, Poisson, market-value and Brier-score calculations have automated tests.
+- **Secrets stay server-side:** API credentials are read from environment variables; the committed `.env.example` contains placeholders only.
 
-- **Frontend**: React + JSX (compiled to vanilla JS)
-- **Styling**: Tailwind CSS
-- **AI Models**: Groq, OpenAI, HuggingFace, Cohere, Anthropic, Google
-- **Data Source**: Football-Data.org API
-- **Deployment**: Render (static site hosting)
+## Architecture
 
-## 📦 Installation & Setup
+```text
+Football data + H2H + optional news
+              |
+              v
+      Transparent baseline
+         (Poisson)
+              |
+      +-------+-------+-------+
+      |       |       |       |
+    Gemini   Groq  DeepSeek   Z.ai
+      |       |       |       |
+      +-------+-------+-------+
+              |
+              v
+     Probability ensemble
+              |
+      +-------+---------+
+      |                 |
+   Forecast         Market layer
+                     (real odds only)
+```
 
-### Prerequisites
-- Node.js 14+ (for local development)
-- API keys for:
-  - Football-Data.org
-  - AI providers (Groq, OpenAI, etc.)
+## Supported model providers
 
-### Local Development
+The current server implementation supports:
+
+- Google Gemini
+- Groq
+- DeepSeek (OpenAI-compatible endpoint)
+- Z.ai (OpenAI-compatible endpoint)
+
+Providers are optional. The system uses every configured provider that responds successfully, rather than treating providers as a simple fallback chain.
+
+## API
+
+### `GET /api/health`
+
+Returns service status and which providers are configured.
+
+### `POST /api/start-predictions`
+
+Fetches upcoming fixtures and starts asynchronous batch forecasting.
+
+### `GET /api/predictions`
+
+Returns completed predictions and processing progress.
+
+### `POST /api/predict-batch`
+
+Accepts a small batch of match objects for on-demand forecasting.
+
+### `POST /api/value`
+
+Input:
+
+```json
+{
+  "probabilities": { "home": 0.52, "draw": 0.27, "away": 0.21 },
+  "odds": { "home": 2.10, "draw": 3.60, "away": 4.50 }
+}
+```
+
+Returns implied probabilities, expected value, edge and no-vig market probabilities.
+
+## Setup
+
+Requires **Node.js 18+**.
+
 ```bash
-# Clone the repository
-git clone https://github.com/Quranhub1/Surebet-Pro.git
-cd surebet-pro
-
-# Install dependencies
 npm install
-
-# Test environment configuration
-npm run test-env
-
-# Start development server
-npm run dev
+cp .env.example .env
+npm run check
+npm test
+npm start
 ```
 
-### API Configuration
+Configure at least one football data source and one AI provider for the full engine. All credentials must be stored in the hosting platform's environment-variable settings or an untracked local `.env` file.
 
-#### Option 1: In-App Configuration (Development)
-1. Open the app in your browser
-2. Click the settings icon (⚙️) in the top-right corner
-3. Enter your API keys in the configuration modal
-4. Select your preferred AI provider
+## Configuration
 
-#### Option 2: Environment Variables (Production/Render)
-For secure production deployment, use environment variables:
+Important variables:
 
-1. **Copy the environment template**:
-   ```bash
-   cp .env.example .env
-   ```
+```env
+FOOTBALL_DATA_API_KEY=...
+GOOGLE_AI_API_KEY=...
+GROQ_API_KEY=...
+DEEPSEEK_API_KEY=...
+Z_AI_API_KEY=...
+TAVILY_API_KEY=...
 
-2. **Fill in your API keys** in the `.env` file:
-   ```env
-   # Football Data API (from football-data.org)
-   FOOTBALL_DATA_API_KEY=your_actual_api_key_here
-
-   # AI API Keys (at least one required)
-   GROQ_API_KEY=your_groq_api_key_here
-   OPENAI_API_KEY=your_openai_api_key_here
-   ANTHROPIC_API_KEY=your_anthropic_api_key_here
-   GOOGLE_AI_API_KEY=your_google_ai_api_key_here
-   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
-   COHERE_API_KEY=your_cohere_api_key_here
-
-   # Default AI Provider
-   DEFAULT_AI_PROVIDER=groq
-
-   # Daily Target for Predictions
-   DAILY_TARGET=100
-   ```
-
-3. **For Render Deployment**: Set these as environment variables in your Render dashboard:
-   - Go to your Render service → Environment
-   - Add each variable with its value
-   - The app will automatically use these secure environment variables
-
-## 🚀 Deployment on Render
-
-### Automatic Deployment (Recommended)
-1. **Connect GitHub Repository**:
-   - Go to [Render Dashboard](https://dashboard.render.com)
-   - Click "New +" → "Static Site"
-   - Connect your GitHub account
-   - Select the `Quranhub1/Surebet-Pro` repository
-
-2. **Configure Build Settings**:
-   - **Build Command**: `npm install`
-   - **Publish Directory**: `.` (root directory)
-   - **Node Version**: 18 or later
-
-3. **Environment Variables** (Required for API functionality):
-   - Go to your Render service → Environment
-   - Add the following environment variables:
-     ```
-     FOOTBALL_DATA_API_KEY=your_football_data_api_key
-     GROQ_API_KEY=your_groq_api_key
-     OPENAI_API_KEY=your_openai_api_key
-     ANTHROPIC_API_KEY=your_anthropic_api_key
-     GOOGLE_AI_API_KEY=your_google_ai_api_key
-     HUGGINGFACE_API_KEY=your_huggingface_api_key
-     COHERE_API_KEY=your_cohere_api_key
-     DEFAULT_AI_PROVIDER=groq
-     DAILY_TARGET=100
-     ```
-   - **Important**: At least one AI API key is required for predictions to work
-
-4. **Deploy**:
-   - Click "Create Static Site"
-   - Render will automatically build and deploy on every push to main branch
-
-### Manual Deployment
-If you prefer manual deployment:
-```bash
-# Push to GitHub
-git add .
-git commit -m "Ready for deployment"
-git push origin main
+MAX_MATCHES=100
+PREDICTION_BATCH_SIZE=8
+PREDICTION_BATCH_DELAY_MS=1500
+FIXTURE_CACHE_TTL_MS=600000
 ```
 
-The site will be automatically deployed via Render's GitHub integration.
+Optional `AI_WEIGHT_GEMINI`, `AI_WEIGHT_GROQ`, `AI_WEIGHT_DEEPSEEK` and `AI_WEIGHT_ZAI` values control ensemble weighting.
 
-## 🔧 Configuration
+## Validation roadmap
 
-### API Keys Setup
-The app supports multiple AI providers for ensemble predictions:
-- **Groq**: Fast inference, good for real-time predictions
-- **OpenAI**: GPT models for detailed analysis
-- **HuggingFace**: Open-source models
-- **Cohere**: Specialized language models
-- **Anthropic**: Claude models
-- **Google**: Gemini models
+The code now exposes the primitives needed for empirical validation, including Brier score calculation. However, **historical accuracy, calibration and ROI cannot honestly be claimed until predictions are persisted alongside final match outcomes**.
 
-Configure these in the app's settings modal or via environment variables.
+The next production step is a durable prediction/outcome database and an automated evaluation pipeline tracking:
 
-## 📊 Betting Markets Explained
+- 1X2 accuracy and log loss
+- Brier score
+- calibration/reliability curves
+- market-specific hit rate
+- closing-line value (CLV)
+- ROI/yield
+- maximum drawdown
+- performance by league, odds band and model provider
 
-### Match Result (1X2)
-- **1**: Home team wins
-- **X**: Match ends in draw
-- **2**: Away team wins
+Until that dataset exists, the engine should be treated as a forecasting tool, not a proven profitable system.
 
-### Double Chance
-- **1X**: Home win or draw
-- **2X**: Away win or draw
-- **12**: Home or away win (no draw)
+## Security
 
-### Over/Under Goals
-- **O0.5**: Total goals > 0.5 (at least 1 goal)
-- **U0.5**: Total goals < 0.5 (no goals)
-- **O1.5**: Total goals > 1.5 (2+ goals)
-- **U1.5**: Total goals < 1.5 (0-1 goals)
-- **O2.5**: Total goals > 2.5 (3+ goals)
-- **U2.5**: Total goals < 2.5 (0-2 goals)
-- **O3.5**: Total goals > 3.5 (4+ goals)
-- **U3.5**: Total goals < 3.5 (0-3 goals)
-- **O4.5**: Total goals > 4.5 (5+ goals)
-- **U4.5**: Total goals < 4.5 (0-4 goals)
+Never commit `.env`, API keys, bookmaker credentials or database credentials. If a credential has previously been committed to a public repository, **revoke and rotate it immediately**; deleting it from the latest file does not invalidate the leaked credential.
 
-### Both Teams To Score (BTTS)
-- **Yes**: Both teams score at least one goal
-- **No**: At least one team doesn't score
+## License
 
-### Draw No Bet (DNB)
-- **1**: Home team wins (draw returns stake)
-- **2**: Away team wins (draw returns stake)
-
-### Asian Handicap
-- **H-0.5**: Home team wins by 1+ goals
-- **A-0.5**: Away team wins by 1+ goals
-- **H+1**: Home team loses by 0 goals or wins
-- **A+1**: Away team loses by 0 goals or wins
-
-### Correct Score
-Top 15 most likely scorelines with their respective odds.
-
-## 🤖 AI Prediction System
-
-The platform uses an ensemble approach combining multiple AI models:
-
-1. **Data Collection**: Real match statistics, form, head-to-head
-2. **Multi-Model Analysis**: Each AI model provides predictions
-3. **Ensemble Processing**: Weighted combination for final prediction
-4. **Confidence Scoring**: Agreement level between models
-5. **Odds Generation**: Probability-to-odds conversion
-
-## 📱 Usage
-
-1. **Load Matches**: Click "Refresh" to fetch latest matches
-2. **View Predictions**: Expand matches to see AI predictions
-3. **Add Bets**: Click betting market buttons to add to bet slip
-4. **Manage Bets**: Adjust stakes and review potential returns
-5. **Get Explanations**: Click "Show Explanation" for detailed reasoning
-
-## 🔒 Security & Privacy
-
-- All API keys are stored locally in browser storage
-- No user data is collected or stored
-- Predictions are generated client-side
-- Secure HTTPS deployment on Render
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📞 Support
-
-For issues or questions:
-- Create an issue on GitHub
-- Check the troubleshooting section below
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**Site not loading**:
-- Check browser console for errors
-- Ensure API keys are configured
-- Verify internet connection
-
-**Predictions not showing**:
-- Check API key validity
-- Ensure AI provider services are operational
-- Try refreshing the page
-
-**Bet slip not working**:
-- Clear browser cache
-- Check JavaScript console for errors
-
----
-
-**Built with ❤️ for football enthusiasts and betting professionals**
+MIT License — see `LICENSE` if present.
