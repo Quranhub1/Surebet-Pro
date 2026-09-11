@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
 import { generateWithAi, getActiveAiConfig, getAiModels, type AiProvider } from './services/AiModelService';
 import { oddsApiService } from './services/OddsApiService';
 import { getUser, login, register, createSession, verifySession } from './services/AuthService';
@@ -32,3 +33,8 @@ app.get('/api/football/live', async (_req, res) => { try { const matches = await
 app.get('/api/ai/models', (_req, res) => res.json({ active: getActiveAiConfig(), models: getAiModels() }));
 app.post('/api/ai/generate', async (req, res) => { try { const body = req.body as { provider?: AiProvider; prompt?: string; system?: string; temperature?: number; maxTokens?: number }; if (!body.prompt || typeof body.prompt !== 'string') return res.status(400).json({ error: 'prompt is required' }); if (body.provider && body.provider !== 'gemini' && body.provider !== 'groq') return res.status(400).json({ error: 'provider must be gemini or groq' }); const content = await generateWithAi(body); res.json({ ok: true, provider: body.provider || getActiveAiConfig().provider, content }); } catch (error) { const message = error instanceof Error ? error.message : 'AI generation failed'; console.error('[AI] Generation failed:', message); res.status(502).json({ error: message }); } });
 app.get('/api/scheduler', async (_req, res) => { try { const rows = await sql`SELECT last_run_date, last_run_at, last_run_status FROM system_settings WHERE id = 1`; const data = rows[0]; res.json({ enabled: true, intervalHours: 12, liveRefreshMinutes: 2, timezone: 'Africa/Kampala', lastRunDate: data?.last_run_date ?? null, lastRunAt: data?.last_run_at ?? null, lastRunStatus: data?.last_run_status ?? null }); } catch { res.status(503).json({ enabled: true, intervalHours: 12, liveRefreshMinutes: 2, timezone: 'Africa/Kampala', lastRunDate: null, lastRunAt: null, lastRunStatus: null }); } });
+
+// Serve the Vite production build from the same Render service. API routes above remain available under /api/*.
+const frontendDist = path.resolve(process.cwd(), 'dist');
+app.use(express.static(frontendDist));
+app.get('*', (_req, res) => res.sendFile(path.join(frontendDist, 'index.html')));
