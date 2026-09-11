@@ -18,7 +18,7 @@ export class ScannerScheduler {
 
     await this.runFullScanIfDue();
     await this.refreshLiveMatches();
-    this.scheduleNextFullScan();
+    await this.scheduleNextFullScan();
     this.scheduleNextLiveRefresh();
   }
 
@@ -28,12 +28,32 @@ export class ScannerScheduler {
     if (this.liveRefreshTimer) clearTimeout(this.liveRefreshTimer);
   }
 
-  private scheduleNextFullScan(): void {
+  private async scheduleNextFullScan(): Promise<void> {
     if (!this.isRunning) return;
+
+    let delay = FULL_SCAN_INTERVAL_MS;
+    try {
+      const { data } = await supabase
+        .from('system_settings')
+        .select('last_run_at')
+        .eq('id', 1)
+        .single();
+
+      if (data?.last_run_at) {
+        const elapsed = Date.now() - new Date(data.last_run_at).getTime();
+        delay = Math.max(1000, FULL_SCAN_INTERVAL_MS - elapsed);
+      }
+    } catch (error) {
+      console.error('[Scanner] Could not calculate the next full scan time:', error);
+    }
+
+    const hours = (delay / 3600000).toFixed(1);
+    console.log(`[Scanner] Next full match generation cycle in approximately ${hours} hours.`);
+
     this.fullScanTimer = setTimeout(async () => {
       await this.executeFullScan();
-      this.scheduleNextFullScan();
-    }, FULL_SCAN_INTERVAL_MS);
+      await this.scheduleNextFullScan();
+    }, delay);
   }
 
   private scheduleNextLiveRefresh(): void {
@@ -59,10 +79,10 @@ export class ScannerScheduler {
         await this.executeFullScan();
       } else {
         const remainingHours = ((FULL_SCAN_INTERVAL_MS - (Date.now() - lastRunAt)) / 3600000).toFixed(1);
-        console.log(`[Scanner] Next full scan is due in approximately ${remainingHours} hours.`);
+        console.log(`[Scanner] Full scan already completed recently. Next cycle is due in approximately ${remainingHours} hours.`);
       }
     } catch (error) {
-      console.error('[Scanner] Could not determine the next full scan:', error);
+      console.error('[Scanner] Could not determine the full scan schedule:', error);
       await this.executeFullScan();
     }
   }
