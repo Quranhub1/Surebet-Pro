@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Calculator as CalcIcon, Plus, Trash2, DollarSign } from 'lucide-react';
 
 interface Outcome {
@@ -10,13 +10,13 @@ interface Outcome {
 export function Calculator() {
   const [totalBank, setTotalBank] = useState<string>('1000');
   const [outcomes, setOutcomes] = useState<Outcome[]>([
-    { id: '1', name: 'Resultado 1', odd: '2.10' },
-    { id: '2', name: 'Resultado 2', odd: '2.05' }
+    { id: '1', name: 'Outcome 1', odd: '2.10' },
+    { id: '2', name: 'Outcome 2', odd: '2.05' }
   ]);
 
   const addOutcome = () => {
-    if (outcomes.length >= 3) return; // Limita a 3 resultados (1X2)
-    setOutcomes([...outcomes, { id: Date.now().toString(), name: `Resultado ${outcomes.length + 1}`, odd: '' }]);
+    if (outcomes.length >= 3) return; // Limit to 3 outcomes (1X2)
+    setOutcomes([...outcomes, { id: Date.now().toString(), name: `Outcome ${outcomes.length + 1}`, odd: '' }]);
   };
 
   const removeOutcome = (id: string) => {
@@ -28,7 +28,6 @@ export function Calculator() {
     setOutcomes(outcomes.map(o => o.id === id ? { ...o, [field]: value } : o));
   };
 
-  // Cálculos
   const bank = parseFloat(totalBank) || 0;
   let totalImpliedProb = 0;
   let isValid = true;
@@ -60,18 +59,17 @@ export function Calculator() {
         <div className="w-12 h-12 rounded-xl bg-[#39FF14]/10 flex items-center justify-center border border-[#39FF14]/20 shadow-sm">
           <CalcIcon className="w-6 h-6 text-[#39FF14]" />
         </div>
-        <h1 className="text-3xl font-extrabold text-white tracking-tight">Calculadora Manual</h1>
+        <h1 className="text-3xl font-extrabold text-white tracking-tight">Manual Calculator</h1>
       </div>
       <p className="text-[#8b8d93] text-sm font-medium mb-10 ml-16">
-        Insira as odds manualmente para descobrir se existe uma oportunidade de arbitragem.
+        Enter odds manually to determine whether an arbitrage opportunity exists.
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Configuração */}
         <div className="bg-[#161618] border border-[#2c2e33] rounded-2xl p-6 shadow-lg h-fit">
           <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
             <DollarSign className="w-5 h-5 text-[#39FF14]" />
-            Banca Total
+            Total Bankroll
           </h2>
           
           <div className="relative shadow-sm rounded-xl mb-8">
@@ -85,7 +83,7 @@ export function Calculator() {
           </div>
 
           <div className={`p-5 rounded-xl border ${isSurebet ? 'bg-[#1a2e15] border-[#2a4a22]' : 'bg-[#1a1a1a] border-[#333]'}`}>
-            <div className="text-sm font-bold text-gray-400 mb-1">Status da Operação</div>
+            <div className="text-sm font-bold text-gray-400 mb-1">Operation Status</div>
             {isSurebet ? (
               <>
                 <div className="text-3xl font-black text-[#39FF14] mb-2">SUREBET!</div>
@@ -94,24 +92,22 @@ export function Calculator() {
                   <span className="font-bold text-[#39FF14]">{roi.toFixed(2)}%</span>
                 </div>
                 <div className="flex justify-between text-sm mt-1">
-                  <span className="text-gray-400">Lucro:</span>
+                  <span className="text-gray-400">Profit:</span>
                   <span className="font-bold text-[#39FF14]">R$ {guaranteedProfit.toFixed(2)}</span>
                 </div>
               </>
             ) : (
-              <div className="text-xl font-bold text-red-500">Prejuízo (Margem &gt; 100%)</div>
+              <div className="text-xl font-bold text-red-500">Loss (Margin &gt; 100%)</div>
             )}
             <div className="mt-4 text-xs text-gray-500">
-              Margem Total: {(totalImpliedProb * 100).toFixed(2)}%
+              Total Margin: {(totalImpliedProb * 100).toFixed(2)}%
             </div>
           </div>
         </div>
 
-        {/* Resultados */}
         <div className="lg:col-span-2 space-y-4">
-          {calculatedOutcomes.map((outcome, idx) => (
+          {calculatedOutcomes.map((outcome) => (
             <div key={outcome.id} className="bg-[#161618] border border-[#2c2e33] rounded-2xl p-6 flex flex-col md:flex-row items-center gap-4 shadow-lg relative group">
-              
               {outcomes.length > 2 && (
                 <button 
                   onClick={() => removeOutcome(outcome.id)}
@@ -122,7 +118,7 @@ export function Calculator() {
               )}
 
               <div className="flex-1 w-full">
-                <label className="block text-xs text-gray-500 font-bold mb-1 uppercase">Nome do Resultado</label>
+                <label className="block text-xs text-gray-500 font-bold mb-1 uppercase">Outcome Name</label>
                 <input 
                   type="text" 
                   value={outcome.name}
@@ -132,7 +128,7 @@ export function Calculator() {
               </div>
 
               <div className="w-full md:w-32">
-                <label className="block text-xs text-gray-500 font-bold mb-1 uppercase">Odd</label>
+                <label className="block text-xs text-gray-500 font-bold mb-1 uppercase">Odds</label>
                 <input 
                   type="number" 
                   step="0.01"
@@ -143,7 +139,7 @@ export function Calculator() {
               </div>
 
               <div className="w-full md:w-40 bg-[#111] rounded-lg p-3 border border-[#333] text-center">
-                <div className="text-xs text-gray-500 font-bold mb-1 uppercase">Apostar</div>
+                <div className="text-xs text-gray-500 font-bold mb-1 uppercase">Stake</div>
                 <div className="text-xl font-black text-white">R$ {outcome.stake.toFixed(2)}</div>
               </div>
             </div>
@@ -154,7 +150,7 @@ export function Calculator() {
               onClick={addOutcome}
               className="w-full py-4 border-2 border-dashed border-[#333] rounded-2xl text-gray-400 hover:text-white hover:border-[#39FF14] hover:bg-[#39FF14]/5 transition-all flex items-center justify-center gap-2 font-bold"
             >
-              <Plus className="w-5 h-5" /> Adicionar 3º Resultado (Ex: Empate)
+              <Plus className="w-5 h-5" /> Add 3rd Outcome (e.g. Draw)
             </button>
           )}
         </div>
