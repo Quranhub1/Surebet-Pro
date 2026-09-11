@@ -1,11 +1,7 @@
 import axios from 'axios';
-import { supabase } from '../lib/supabase';
+import { sql } from '../lib/db';
 
-interface ApiLeague {
-  name: string;
-  slug: string;
-  sport: string;
-}
+interface ApiLeague { name: string; slug: string; sport: string; }
 
 interface NormalizedEvent {
   id: string;
@@ -15,82 +11,53 @@ interface NormalizedEvent {
   home_team: string;
   away_team: string;
   commence_time: string;
-  bookmakers: {
-    key: string;
-    markets: {
-      key: string;
-      outcomes: { name: string; price: number }[];
-    }[];
-  }[];
+  bookmakers: { key: string; markets: { key: string; outcomes: { name: string; price: number }[] }[] }[];
 }
 
 export interface LiveFootballMatch {
-  id: string;
-  league: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeScore: number | null;
-  awayScore: number | null;
-  status: string;
-  startTime: string;
-  minute: number | null;
+  id: string; league: string; homeTeam: string; awayTeam: string;
+  homeScore: number | null; awayScore: number | null; status: string;
+  startTime: string; minute: number | null;
 }
 
 export class OddsApiService {
   private async getApiConfig() {
     try {
-      const { data } = await supabase
-        .from('system_settings')
-        .select('odds_api_key, api_base_url, api_endpoint_odds')
-        .eq('id', 1)
-        .single();
-
+      const rows = await sql`SELECT odds_api_key, api_base_url, api_endpoint_odds FROM system_settings WHERE id = 1`;
+      const data = rows[0];
       return {
         key: data?.odds_api_key || process.env.ODDS_API_KEY || '',
         baseUrl: (data?.api_base_url || 'https://api.odds-api.io/v3').replace(/\/$/, ''),
         endpoint: data?.api_endpoint_odds || '/odds',
       };
     } catch (error) {
-      console.error('[OddsApiService] Error loading API configuration:', error);
-      return {
-        key: process.env.ODDS_API_KEY || '',
-        baseUrl: 'https://api.odds-api.io/v3',
-        endpoint: '/odds',
-      };
+      console.error('[OddsApiService] Error loading Neon API configuration:', error);
+      return { key: process.env.ODDS_API_KEY || '', baseUrl: 'https://api.odds-api.io/v3', endpoint: '/odds' };
     }
   }
 
   private async request(path: string, params: Record<string, string | number>) {
     const config = await this.getApiConfig();
-    if (!config.key) throw new Error('No API key configured.');
-
+    if (!config.key) throw new Error('No Odds API key configured.');
     const response = await axios.get(`${config.baseUrl}${path}`, {
       params: { ...params, apiKey: config.key },
       headers: { Accept: 'application/json' },
     });
-
     return response.data;
   }
 
   public async getActiveLeagues(activeSportGroups: string[]): Promise<ApiLeague[]> {
     if (activeSportGroups.length === 0) return [];
-
     try {
       const sports = await this.request('/sports', {});
       const wanted = new Set(activeSportGroups.map(value => value.toLowerCase()));
-      const matchedSports = (Array.isArray(sports) ? sports : []).filter((sport: any) =>
-        wanted.has(String(sport.slug || sport.name).toLowerCase())
-      );
-
+      const matchedSports = (Array.isArray(sports) ? sports : []).filter((sport: any) => wanted.has(String(sport.slug || sport.name).toLowerCase()));
       const leagues: ApiLeague[] = [];
       for (const sport of matchedSports) {
         const sportSlug = sport.slug || sport.name;
         const sportLeagues = await this.request('/leagues', { sport: sportSlug, all: 'true' });
-        for (const league of Array.isArray(sportLeagues) ? sportLeagues : []) {
-          leagues.push({ name: league.name, slug: league.slug, sport: sportSlug });
-        }
+        for (const league of Array.isArray(sportLeagues) ? sportLeagues : []) leagues.push({ name: league.name, slug: league.slug, sport: sportSlug });
       }
-
       return leagues;
     } catch (error: any) {
       console.warn('[OddsApiService] Could not load sports/leagues:', error.message);
@@ -98,20 +65,9 @@ export class OddsApiService {
     }
   }
 
-  public async getOddsForSport(
-    sportKey: string,
-    leagueKey: string,
-    activeMarkets: string[],
-    activeBookmakers: string[]
-  ): Promise<NormalizedEvent[]> {
+  public async getOddsForSport(sportKey: string, leagueKey: string, activeMarkets: string[], activeBookmakers: string[]): Promise<NormalizedEvent[]> {
     try {
-      const events = await this.request('/events', {
-        sport: sportKey,
-        league: leagueKey,
-        status: 'pending',
-        limit: 100,
-      });
-
+      const events = await this.request('/events', { sport: sportKey, league: leagueKey, status: 'pending', limit: 100 });
       return this.getOddsForEvents(Array.isArray(events) ? events : [], activeMarkets, activeBookmakers);
     } catch (error: any) {
       console.error(`[OddsApiService] Error fetching odds for ${sportKey}/${leagueKey}:`, error.message);
@@ -119,11 +75,7 @@ export class OddsApiService {
     }
   }
 
-  public async getLiveOdds(
-    activeSportGroups: string[],
-    activeMarkets: string[],
-    activeBookmakers: string[]
-  ): Promise<NormalizedEvent[]> {
+  public async getLiveOdds(activeSportGroups: string[], activeMarkets: string[], activeBookmakers: string[]): Promise<NormalizedEvent[]> {
     try {
       const liveEvents = await this.request('/events/live', {});
       const wantedSports = new Set(activeSportGroups.map(value => value.toLowerCase()));
@@ -131,7 +83,6 @@ export class OddsApiService {
         const sportKey = String(event.sport?.slug || event.sport?.name || '').toLowerCase();
         return wantedSports.size === 0 || wantedSports.has(sportKey);
       });
-
       return this.getOddsForEvents(filteredEvents, activeMarkets, activeBookmakers);
     } catch (error: any) {
       console.error('[OddsApiService] Error fetching live odds:', error.message);
@@ -146,16 +97,11 @@ export class OddsApiService {
         const sport = `${event.sport?.slug || ''} ${event.sport?.name || ''}`.toLowerCase();
         return sport.includes('soccer') || sport.includes('football');
       });
-
       return footballEvents.map((event: any) => ({
-        id: String(event.id),
-        league: event.league?.name || 'Football',
-        homeTeam: event.home || 'Home',
-        awayTeam: event.away || 'Away',
+        id: String(event.id), league: event.league?.name || 'Football', homeTeam: event.home || 'Home', awayTeam: event.away || 'Away',
         homeScore: this.toScore(event.homeScore ?? event.scores?.home ?? event.score?.home),
         awayScore: this.toScore(event.awayScore ?? event.scores?.away ?? event.score?.away),
-        status: String(event.status || event.state || 'LIVE'),
-        startTime: event.date || event.startTime || new Date().toISOString(),
+        status: String(event.status || event.state || 'LIVE'), startTime: event.date || event.startTime || new Date().toISOString(),
         minute: this.toScore(event.minute ?? event.timer ?? event.clock?.minute),
       }));
     } catch (error: any) {
@@ -170,84 +116,47 @@ export class OddsApiService {
     return Number.isFinite(numeric) ? numeric : null;
   }
 
-  private async getOddsForEvents(
-    events: any[],
-    activeMarkets: string[],
-    activeBookmakers: string[]
-  ): Promise<NormalizedEvent[]> {
+  private async getOddsForEvents(events: any[], activeMarkets: string[], activeBookmakers: string[]): Promise<NormalizedEvent[]> {
     const results: NormalizedEvent[] = [];
     const bookmakersParam = activeBookmakers.join(',');
-
     for (let i = 0; i < events.length; i += 10) {
       const batch = events.slice(i, i + 10);
       if (batch.length === 0) continue;
-
-      const oddsData = await this.request('/odds/multi', {
-        eventIds: batch.map((event: any) => event.id).join(','),
-        bookmakers: bookmakersParam,
-      });
-
-      for (const event of Array.isArray(oddsData) ? oddsData : []) {
-        results.push(this.normalizeEvent(event, activeMarkets));
-      }
+      const oddsData = await this.request('/odds/multi', { eventIds: batch.map((event: any) => event.id).join(','), bookmakers: bookmakersParam });
+      for (const event of Array.isArray(oddsData) ? oddsData : []) results.push(this.normalizeEvent(event, activeMarkets));
     }
-
     return results.filter(event => event.bookmakers.length >= 2);
   }
 
   private normalizeEvent(event: any, activeMarkets: string[]): NormalizedEvent {
-    const marketAliases: Record<string, string> = {
-      h2h: 'ML',
-      moneyline: 'ML',
-      spread: 'Spread',
-      totals: 'Over/Under',
-    };
+    const marketAliases: Record<string, string> = { h2h: 'ML', moneyline: 'ML', spread: 'Spread', totals: 'Over/Under' };
     const wantedMarkets = new Set(activeMarkets.map(key => marketAliases[key] || key));
-
     const bookmakers = Object.entries(event.bookmakers || {}).map(([bookmakerKey, markets]) => {
       const normalizedMarkets: { key: string; outcomes: { name: string; price: number }[] }[] = [];
-
       for (const market of (markets as any[]) || []) {
         if (wantedMarkets.size > 0 && !wantedMarkets.has(market.name)) continue;
         const odds = Array.isArray(market.odds) ? market.odds[0] : null;
         if (!odds) continue;
-
         const outcomes: { name: string; price: number }[] = [];
-        const addOutcome = (name: string, value: unknown) => {
-          const price = Number(value);
-          if (Number.isFinite(price) && price > 1) outcomes.push({ name, price });
-        };
-
+        const addOutcome = (name: string, value: unknown) => { const price = Number(value); if (Number.isFinite(price) && price > 1) outcomes.push({ name, price }); };
         if (odds.home !== undefined) addOutcome(event.home, odds.home);
         if (odds.draw !== undefined) addOutcome('Draw', odds.draw);
         if (odds.away !== undefined) addOutcome(event.away, odds.away);
         if (odds.over !== undefined) addOutcome(`Over ${odds.max ?? ''}`.trim(), odds.over);
         if (odds.under !== undefined) addOutcome(`Under ${odds.max ?? ''}`.trim(), odds.under);
-
         if (outcomes.length >= 2) {
           const key = market.name === 'ML' ? 'h2h' : market.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
           normalizedMarkets.push({ key, outcomes });
         }
       }
-
       return { key: bookmakerKey, markets: normalizedMarkets };
     }).filter(bookmaker => bookmaker.markets.length > 0);
-
     return {
-      id: String(event.id),
-      sport_key: event.sport?.slug || sportKeyFallback(event),
-      sport_title: event.sport?.name || 'Unknown',
-      league_title: event.league?.name || 'Unknown League',
-      home_team: event.home,
-      away_team: event.away,
-      commence_time: event.date,
-      bookmakers,
+      id: String(event.id), sport_key: event.sport?.slug || sportKeyFallback(event), sport_title: event.sport?.name || 'Unknown',
+      league_title: event.league?.name || 'Unknown League', home_team: event.home, away_team: event.away, commence_time: event.date, bookmakers,
     };
   }
 }
 
-function sportKeyFallback(event: any): string {
-  return event.sport?.slug || 'unknown';
-}
-
+function sportKeyFallback(event: any): string { return event.sport?.slug || 'unknown'; }
 export const oddsApiService = new OddsApiService();
