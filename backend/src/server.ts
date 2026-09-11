@@ -8,6 +8,7 @@ import { getUser, login, register, createSession, verifySession } from './servic
 import { newId, sql } from './lib/db';
 
 const app = express(); app.use(cors()); app.use(express.json());
+const ANALYSIS_INTERVAL_MS = 12 * 60 * 60 * 1000;
 let manualAnalysisRunning = false;
 function authUserId(req: express.Request): string | null { const header = req.headers.authorization || ''; return header.startsWith('Bearer ') ? verifySession(header.slice(7)) : null; }
 export async function startServer(): Promise<void> { const PORT = Number(process.env.PORT || 3001); await new Promise<void>(resolve => app.listen(PORT, '0.0.0.0', () => { console.log(`[API] Server running on port ${PORT}`); resolve(); })); }
@@ -27,11 +28,35 @@ app.delete('/api/alerts/:id', async (req, res) => { const userId = authUserId(re
 app.get('/api/reports', async (_req, res) => { try { const stats = await sql`SELECT COUNT(*)::int AS total, COALESCE(AVG(roi), 0)::float AS avg_roi, COALESCE(SUM(profit), 0)::float AS total_profit FROM surebet_opportunities WHERE is_active = true`; const daily = await sql`SELECT DATE(created_at) AS date, COUNT(*)::int AS opportunities, COALESCE(AVG(roi), 0)::float AS roi FROM surebet_opportunities WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY date`; res.json({ ok: true, stats: stats[0] || { total: 0, avg_roi: 0, total_profit: 0 }, daily }); } catch (error) { console.error('[API] Report query failed:', error); res.status(500).json({ error: 'Failed to load reports' }); } });
 
 app.get('/api/football/live', async (_req, res) => { try { const matches = await oddsApiService.getLiveFootballMatches(); res.json({ ok: true, updatedAt: new Date().toISOString(), count: matches.length, matches }); } catch (error) { const message = error instanceof Error ? error.message : 'Live football feed failed'; console.error('[Football] Live feed failed:', message); res.status(502).json({ ok: false, error: message, matches: [] }); } });
-app.get('/api/football/predictions', async (_req, res) => { try { const predictions = await aiPredictionService.getPredictions(40); res.json({ ok: true, updatedAt: new Date().toISOString(), count: predictions.length, predictions }); } catch (error) { const message = error instanceof Error ? error.message : 'Match predictions failed'; console.error('[Football] AI prediction feed failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } });
-app.post('/api/football/analyze-now', async (_req, res) => { if (manualAnalysisRunning) return res.status(409).json({ ok: false, running: true, error: 'Football analysis is already running.' }); manualAnalysisRunning = true; console.log('[AI] Manual football analysis requested from dashboard for up to 40 games.'); try { const predictions = await aiPredictionService.runAutomaticAnalysis(40); res.json({ ok: true, count: predictions.length, predictions, completedAt: new Date().toISOString() }); } catch (error) { const message = error instanceof Error ? error.message : 'Manual football analysis failed'; console.error('[AI] Manual analysis failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } finally { manualAnalysisRunning = false; } });
+app.get('/api/football/predictions', async (_req, res) => { try { const predictions = await aiPredictionService.getPredictions(40); const [rows] = await Promise.all([sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`]); const lastRunAt = rows?.[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).toISOString() : null; res.json({ ok: true, updatedAt: lastRunAt || new Date().toISOString(), count: predictions.length, predictions, analysisLastRunAt: lastRunAt, analysisLastRunStatus: rows?.[0]?.analysis_last_run_status ?? null }); } catch (error) { const message = error instanceof Error ? error.message : 'Match predictions failed'; console.error('[Football] AI prediction feed failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } });
+app.post('/api/football/analyze-now', async (_req, res) => { if (manualAnalysisRunning) return res.status(409).json({ ok: false, running: true, error: 'Football analysis is already running.' });
+  try {
+    const rows = await sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`;
+    const lastRunAt = rows[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).getTime() : 0;
+    if (lastRunAt && Date.now() - lastRunAt < ANALYSIS_INTERVAL_MS) {
+      const predictions = await aiPredictionService.getPredictions(40);
+      const nextRunAt = new Date(lastRunAt + ANALYSIS_INTERVAL_MS).toISOString();
+      console.log(`[AI] Returning the shared analysis cycle to another user. Next new analysis is due at ${nextRunAt}.`);
+      return res.json({ ok: true, shared: true, count: predictions.length, predictions, completedAt: new Date(lastRunAt).toISOString(), nextRunAt, status: rows[0]?.analysis_last_run_status || 'success' });
+    }
+    manualAnalysisRunning = true;
+    console.log('[AI] Manual football analysis requested from dashboard for the shared 12-hour cycle, targeting up to 40 games.');
+    const predictions = await aiPredictionService.runAutomaticAnalysis(40);
+    const completedAt = new Date();
+    await sql`UPDATE system_settings SET analysis_last_run_at = ${completedAt.toISOString()}, analysis_last_run_status = ${predictions.length ? 'success' : 'no_fixtures'} WHERE id = 1`;
+    const nextRunAt = new Date(completedAt.getTime() + ANALYSIS_INTERVAL_MS).toISOString();
+    res.json({ ok: true, shared: false, count: predictions.length, predictions, completedAt: completedAt.toISOString(), nextRunAt, status: predictions.length ? 'success' : 'no_fixtures' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Manual football analysis failed';
+    console.error('[AI] Manual analysis failed:', message);
+    res.status(502).json({ ok: false, error: message, predictions: [] });
+  } finally {
+    manualAnalysisRunning = false;
+  }
+});
 app.get('/api/ai/models', (_req, res) => res.json({ active: getActiveAiConfig(), models: getAiModels() }));
 app.post('/api/ai/generate', async (req, res) => { try { const body = req.body as { provider?: AiProvider; prompt?: string; system?: string; temperature?: number; maxTokens?: number }; if (!body.prompt || typeof body.prompt !== 'string') return res.status(400).json({ error: 'prompt is required' }); if (body.provider && body.provider !== 'gemini' && body.provider !== 'groq') return res.status(400).json({ error: 'provider must be gemini or groq' }); const content = await generateWithAi(body); res.json({ ok: true, provider: body.provider || getActiveAiConfig().provider, content }); } catch (error) { const message = error instanceof Error ? error.message : 'AI generation failed'; console.error('[AI] Generation failed:', message); res.status(502).json({ error: message }); } });
-app.get('/api/scheduler', async (_req, res) => { try { const rows = await sql`SELECT last_run_date, last_run_at, last_run_status FROM system_settings WHERE id = 1`; const data = rows[0]; res.json({ enabled: true, intervalHours: 12, liveRefreshMinutes: 2, timezone: 'Africa/Kampala', lastRunDate: data?.last_run_date ?? null, lastRunAt: data?.last_run_at ?? null, lastRunStatus: data?.last_run_status ?? null }); } catch { res.status(503).json({ enabled: true, intervalHours: 12, liveRefreshMinutes: 2, timezone: 'Africa/Kampala', lastRunDate: null, lastRunAt: null, lastRunStatus: null }); } });
+app.get('/api/scheduler', async (_req, res) => { try { const rows = await sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`; const data = rows[0]; const lastRunAt = data?.analysis_last_run_at ? new Date(data.analysis_last_run_at).toISOString() : null; res.json({ enabled: true, intervalHours: 12, liveRefreshMinutes: 2, timezone: 'Africa/Kampala', lastRunDate: lastRunAt ? lastRunAt.slice(0, 10) : null, lastRunAt, lastRunStatus: data?.analysis_last_run_status ?? null, nextRunAt: lastRunAt ? new Date(new Date(lastRunAt).getTime() + ANALYSIS_INTERVAL_MS).toISOString() : null }); } catch { res.status(503).json({ enabled: true, intervalHours: 12, liveRefreshMinutes: 2, timezone: 'Africa/Kampala', lastRunDate: null, lastRunAt: null, lastRunStatus: null, nextRunAt: null }); } });
 
 const frontendDist = path.resolve(process.cwd(), 'dist');
 app.use(express.static(frontendDist));
