@@ -5,7 +5,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3001;
+export async function startServer(): Promise<void> {
+  const PORT = process.env.PORT || 3001;
+  
+  await new Promise<void>((resolve) => {
+    app.listen(PORT, () => {
+      console.log(`[API] Server running on http://localhost:${PORT}`);
+      resolve();
+    });
+  });
+}
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -111,8 +120,4 @@ app.post('/api/scheduler', async (req, res) => {
   } catch {
     res.status(500).json({ error: 'Failed to update scheduler settings' });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`[API] Server running on http://localhost:${PORT}`);
 });
