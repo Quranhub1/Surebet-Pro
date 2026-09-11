@@ -2,18 +2,28 @@ import { oddsApiService } from '../services/OddsApiService';
 import { ArbitrageEngine, SurebetOpportunity } from './ArbitrageEngine';
 import { supabase } from '../lib/supabase';
 
-function getTimeInZone(timezone: string): { hour: number; minute: number } {
+function getTimeInZone(timezone: string): { hour: number; minute: number; date: string } {
   const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-US', {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
-    hour: 'numeric',
-    minute: 'numeric',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
     hour12: false,
   });
-  const parts = formatter.formatToParts(now);
-  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
-  const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
-  return { hour, minute };
+  const parts = Object.fromEntries(
+    formatter.formatToParts(now)
+      .filter(part => part.type !== 'literal')
+      .map(part => [part.type, part.value])
+  );
+
+  return {
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+  };
 }
 
 export class ScannerScheduler {
@@ -21,48 +31,54 @@ export class ScannerScheduler {
   private hasTriggeredToday = false;
 
   constructor() {
-    console.log(`[Scanner] Inicializado. Aguardando partida...`);
+    console.log('[Scanner] Inicializado. Aguardando agendamento...');
   }
 
   public async start() {
     if (this.isRunning) return;
     this.isRunning = true;
     console.log('[Scanner] Motor de busca ativado.');
-    this.runCycle();
+    void this.runCycle();
+  }
+
+  public stop() {
+    this.isRunning = false;
   }
 
   private async runCycle() {
     while (this.isRunning) {
       try {
-        const { data: settings } = await supabase.from('system_settings').select('*').single();
+        const { data: settings } = await supabase
+          .from('system_settings')
+          .select('*')
+          .eq('id', 1)
+          .single();
 
         const schedulerEnabled = settings?.scheduler_enabled ?? false;
         const runHour = settings?.run_hour ?? 6;
         const runMinute = settings?.run_minute ?? 0;
         const timezone = settings?.timezone || 'Africa/Kampala';
-        const minRoi = settings?.min_roi || 1.0;
+        const minRoi = settings?.min_roi ?? 1.0;
 
         if (!schedulerEnabled) {
           console.log('[Scanner] Aguardando agendamento...');
-          await new Promise(resolve => setTimeout(resolve, 60000));
+          await this.sleep(60000);
           continue;
         }
 
-        const { hour, minute } = getTimeInZone(timezone);
-        const now = new Date();
-        const todayStr = now.toISOString().split('T')[0];
+        const { hour, minute, date } = getTimeInZone(timezone);
 
         if (hour === runHour && minute === runMinute && !this.hasTriggeredToday) {
           this.hasTriggeredToday = true;
-          await this.executeScanCycle(minRoi, todayStr);
+          await this.executeScanCycle(minRoi, date);
         } else if (hour !== runHour || minute !== runMinute) {
           this.hasTriggeredToday = false;
         }
 
-        await new Promise(resolve => setTimeout(resolve, 60000));
+        await this.sleep(60000);
       } catch (error) {
-        console.error(`[Scanner] Erro crítico no ciclo:`, error);
-        await new Promise(resolve => setTimeout(resolve, 60000));
+        console.error('[Scanner] Erro crítico no ciclo:', error);
+        await this.sleep(60000);
       }
     }
   }
@@ -80,34 +96,32 @@ export class ScannerScheduler {
       const { data: bookmakers } = await supabase.from('bookmakers').select('key').eq('active', true);
       const activeBookmakers = bookmakers?.map(b => b.key) || ['superbet', 'novibet'];
 
-      console.log(`\n[Scanner] 🔄 Iniciando novo ciclo de busca agendado...`);
+      console.log('\n[Scanner] 🔄 Iniciando novo ciclo de busca agendado...');
 
       if (activeBookmakers.length < 2) {
-        console.log(`[Scanner] AVISO: Menos de 2 casas de apostas ativas. Arbitragem impossível.`);
+        console.log('[Scanner] AVISO: Menos de 2 casas de apostas ativas. Arbitragem impossível.');
       } else if (activeSportGroups.length === 0) {
-        console.log(`[Scanner] Nenhum grupo de esporte ativo. Pulando ciclo.`);
+        console.log('[Scanner] Nenhum grupo de esporte ativo. Pulando ciclo.');
       } else {
-        console.log(`[Scanner] Consultando API para descobrir todas as ligas ativas no mundo...`);
-        const allApiSports = await oddsApiService.getActiveLeagues();
-
-        const leaguesToScan = allApiSports.filter(apiSport =>
-          activeSportGroups.includes(apiSport.group.toLowerCase())
-        );
-
-        console.log(`[Scanner] Mapeamento concluído: ${leaguesToScan.length} ligas encontradas para os esportes selecionados.`);
+        console.log('[Scanner] Consultando API para descobrir ligas dos esportes selecionados...');
+        const leaguesToScan = await oddsApiService.getActiveLeagues(activeSportGroups);
+        console.log(`[Scanner] Mapeamento concluído: ${leaguesToScan.length} ligas encontradas.`);
 
         for (const league of leaguesToScan) {
-          console.log(`[Scanner] Buscando odds para a liga: ${league.title} (${league.key})...`);
+          console.log(`[Scanner] Buscando odds para a liga: ${league.name} (${league.slug})...`);
 
-          const events = await oddsApiService.getOddsForSport(league.key, activeMarkets, activeBookmakers);
+          const events = await oddsApiService.getOddsForSport(
+            league.sport,
+            league.slug,
+            activeMarkets,
+            activeBookmakers
+          );
+
           let foundInLeague = 0;
-
           for (const event of events) {
-            const commenceTime = new Date(event.commence_time).getTime();
-            if (commenceTime <= Date.now()) continue;
+            if (new Date(event.commence_time).getTime() <= Date.now()) continue;
 
             const opportunities = ArbitrageEngine.analyzeEvent(event);
-
             for (const opp of opportunities) {
               if (opp.roi >= minRoi) {
                 foundInLeague++;
@@ -117,14 +131,14 @@ export class ScannerScheduler {
           }
 
           if (foundInLeague > 0) {
-            console.log(`[Engine] 🔥 ${foundInLeague} surebets salvas em ${league.title}!`);
+            console.log(`[Engine] 🔥 ${foundInLeague} surebets salvas em ${league.name}!`);
           }
 
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await this.sleep(1000);
         }
       }
     } catch (error) {
-      console.error(`[Scanner] Erro no ciclo agendado:`, error);
+      console.error('[Scanner] Erro no ciclo agendado:', error);
       runStatus = 'error';
     } finally {
       await supabase
@@ -157,7 +171,7 @@ export class ScannerScheduler {
         is_active: true,
       }).select().single();
 
-      if (oppError || !savedOpp) throw oppError;
+      if (oppError || !savedOpp) throw oppError || new Error('Opportunity was not saved');
 
       const legsToInsert = opp.legs.map(leg => ({
         opportunity_id: savedOpp.id,
@@ -169,8 +183,12 @@ export class ScannerScheduler {
 
       await supabase.from('surebet_legs').insert(legsToInsert);
     } catch (error) {
-      console.error(`[DB] Erro ao salvar oportunidade:`, error);
+      console.error('[DB] Erro ao salvar oportunidade:', error);
     }
+  }
+
+  private sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
