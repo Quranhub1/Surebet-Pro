@@ -100,29 +100,56 @@ export class OddsApiService {
         limit: 100,
       });
 
-      const pendingEvents = Array.isArray(events) ? events : [];
-      const results: NormalizedEvent[] = [];
-      const bookmakersParam = activeBookmakers.join(',');
-
-      for (let i = 0; i < pendingEvents.length; i += 10) {
-        const batch = pendingEvents.slice(i, i + 10);
-        if (batch.length === 0) continue;
-
-        const oddsData = await this.request('/odds/multi', {
-          eventIds: batch.map((event: any) => event.id).join(','),
-          bookmakers: bookmakersParam,
-        });
-
-        for (const event of Array.isArray(oddsData) ? oddsData : []) {
-          results.push(this.normalizeEvent(event, activeMarkets));
-        }
-      }
-
-      return results.filter(event => event.bookmakers.length >= 2);
+      return this.getOddsForEvents(Array.isArray(events) ? events : [], activeMarkets, activeBookmakers);
     } catch (error: any) {
       console.error(`[OddsApiService] Error fetching odds for ${sportKey}/${leagueKey}:`, error.message);
       return [];
     }
+  }
+
+  public async getLiveOdds(
+    activeSportGroups: string[],
+    activeMarkets: string[],
+    activeBookmakers: string[]
+  ): Promise<NormalizedEvent[]> {
+    try {
+      const liveEvents = await this.request('/events/live', {});
+      const wantedSports = new Set(activeSportGroups.map(value => value.toLowerCase()));
+      const filteredEvents = (Array.isArray(liveEvents) ? liveEvents : []).filter((event: any) => {
+        const sportKey = String(event.sport?.slug || event.sport?.name || '').toLowerCase();
+        return wantedSports.size === 0 || wantedSports.has(sportKey);
+      });
+
+      return this.getOddsForEvents(filteredEvents, activeMarkets, activeBookmakers);
+    } catch (error: any) {
+      console.error('[OddsApiService] Error fetching live odds:', error.message);
+      return [];
+    }
+  }
+
+  private async getOddsForEvents(
+    events: any[],
+    activeMarkets: string[],
+    activeBookmakers: string[]
+  ): Promise<NormalizedEvent[]> {
+    const results: NormalizedEvent[] = [];
+    const bookmakersParam = activeBookmakers.join(',');
+
+    for (let i = 0; i < events.length; i += 10) {
+      const batch = events.slice(i, i + 10);
+      if (batch.length === 0) continue;
+
+      const oddsData = await this.request('/odds/multi', {
+        eventIds: batch.map((event: any) => event.id).join(','),
+        bookmakers: bookmakersParam,
+      });
+
+      for (const event of Array.isArray(oddsData) ? oddsData : []) {
+        results.push(this.normalizeEvent(event, activeMarkets));
+      }
+    }
+
+    return results.filter(event => event.bookmakers.length >= 2);
   }
 
   private normalizeEvent(event: any, activeMarkets: string[]): NormalizedEvent {
