@@ -2,28 +2,20 @@ import React from 'react';
 import { Play, RotateCw, Lock, Maximize } from 'lucide-react';
 
 /**
- * COMPONENTE SOLICITADO:
- * Reprodução fiel da tela de espera do Dualite conforme a imagem enviada.
- * Nota: Este componente não faz parte do SurebetPro, foi criado apenas para 
- * atender à sua solicitação de reproduzir o design da imagem.
+ * Requested component:
+ * A faithful reproduction of the Dualite standby screen.
+ * Note: This component is not part of the SurebetPro application and is retained only for design reference.
  */
 export function DualiteStandby() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col font-sans selection:bg-gray-700">
       {/* Top Bar (Browser Mockup) */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-[#222] bg-[#111]">
-        
-        {/* Left Tabs */}
         <div className="flex bg-[#1a1a1a] rounded-md p-1 border border-[#222]">
-          <button className="px-3 py-1 text-sm bg-[#2a2a2a] text-white rounded shadow-sm font-medium">
-            Visualização
-          </button>
-          <button className="px-3 py-1 text-sm text-gray-400 hover:text-white transition-colors">
-            Código
-          </button>
+          <button className="px-3 py-1 text-sm bg-[#2a2a2a] text-white rounded shadow-sm font-medium">Preview</button>
+          <button className="px-3 py-1 text-sm text-gray-400 hover:text-white transition-colors">Code</button>
         </div>
 
-        {/* Center URL Bar */}
         <div className="flex-1 max-w-xl mx-4">
           <div className="flex items-center bg-[#1a1a1a] rounded-md px-3 py-1.5 border border-[#333]">
             <RotateCw className="w-4 h-4 text-gray-500 mr-2" />
@@ -37,10 +29,9 @@ export function DualiteStandby() {
           </div>
         </div>
 
-        {/* Right Actions */}
         <div className="flex items-center gap-2">
           <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-300 bg-[#1a1a1a] border border-[#333] rounded-md hover:bg-[#2a2a2a] transition-colors">
-            <RotateCw className="w-4 h-4" /> Reiniciar
+            <RotateCw className="w-4 h-4" /> Restart
           </button>
           <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-300 bg-[#1a1a1a] border border-[#333] rounded-md hover:bg-[#2a2a2a] transition-colors">
             <Lock className="w-4 h-4" /> Variables
@@ -51,24 +42,22 @@ export function DualiteStandby() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col items-center justify-center">
         <h1 className="text-[22px] font-medium mb-6 text-white tracking-tight">
-          Converse com o Dualite para começar a construir seu app.
+          Talk to Dualite to start building your app.
         </h1>
-        <button 
+        <button
           onClick={() => window.location.reload()}
           className="flex items-center gap-2 px-6 py-2.5 bg-white text-black font-semibold rounded-md hover:bg-gray-200 transition-colors"
         >
-          <Play className="w-4 h-4 fill-current" /> Executar Visualização
+          <Play className="w-4 h-4 fill-current" /> Run Preview
         </button>
       </div>
 
-      {/* Bottom Status Bar */}
       <div className="p-6 flex justify-center">
         <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
           <div className="w-2 h-2 rounded-full bg-[#34d399] shadow-[0_0_8px_rgba(52,211,153,0.5)]"></div>
-          Pronto
+          Ready
         </div>
       </div>
     </div>
