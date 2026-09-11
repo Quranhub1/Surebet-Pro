@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { generateWithAi, getActiveAiConfig, getAiModels, type AiProvider } from './services/AiModelService';
+import { supabase } from './lib/supabase';
 
 const app = express();
 app.use(cors());
@@ -19,7 +20,6 @@ export async function startServer(): Promise<void> {
 
 app.get('/api/health', async (_req, res) => {
   try {
-    const { supabase } = await import('../lib/supabase');
     const { error } = await supabase.from('system_settings').select('id').limit(1);
     const databaseOk = !error;
     
@@ -86,7 +86,6 @@ app.post('/api/ai/generate', async (req, res) => {
 
 app.get('/api/scheduler', async (_req, res) => {
   try {
-    const { supabase } = await import('../lib/supabase');
     const { data, error } = await supabase
       .from('system_settings')
       .select('scheduler_enabled, run_hour, run_minute, timezone, last_run_date, last_run_at, last_run_status')
@@ -129,7 +128,6 @@ app.get('/api/scheduler', async (_req, res) => {
 
 app.post('/api/scheduler', async (req, res) => {
   try {
-    const { supabase } = await import('../lib/supabase');
     const body = req.body as {
       enabled?: boolean;
       runHour?: number;
