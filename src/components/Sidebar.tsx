@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, Calculator, Bell, Settings, ShieldAlert, TrendingUp, LogOut, Target } from 'lucide-react';
+import { Activity, Calculator, Bell, Settings, ShieldAlert, TrendingUp, LogOut, Target, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -14,55 +14,101 @@ const navItems = [
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  collapsed: boolean;
+  mobileOpen: boolean;
+  onToggleCollapsed: () => void;
+  onCloseMobile: () => void;
+}
+
+export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile }: SidebarProps) {
   const { profile, signOut } = useAuth();
 
   return (
-    <aside className="w-64 bg-[#111111] border-r border-[#222] h-screen flex flex-col z-10">
-      <div className="p-6 flex items-center gap-3 border-b border-[#222]">
-        <div className="w-8 h-8 rounded-lg bg-[#39FF14] flex items-center justify-center shadow-[0_0_15px_rgba(57,255,20,0.3)]">
-          <Activity className="text-black w-5 h-5" strokeWidth={2.5} />
-        </div>
-        <span className="text-white font-extrabold text-xl tracking-tight">Surebet<span className="text-[#39FF14]">Pro</span></span>
-      </div>
-      
-      <nav className="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) => clsx(
-              "flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
-              isActive 
-                ? "bg-[#39FF14]/10 text-[#39FF14]" 
-                : "text-gray-400 hover:bg-[#1a1a1a] hover:text-white"
-            )}
-          >
-            <item.icon className={clsx("w-5 h-5", "transition-colors")} />
-            {item.label}
-          </NavLink>
-        ))}
-      </nav>
+    <>
+      {mobileOpen && (
+        <button
+          aria-label="Close navigation"
+          onClick={onCloseMobile}
+          className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm md:hidden"
+        />
+      )}
 
-      <div className="p-4 border-t border-[#222] space-y-4 bg-[#0a0a0a]/50">
-        <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-4">
-          <div className="text-xs text-gray-500 mb-1 truncate font-medium">{profile?.email}</div>
-          <div className="text-sm font-bold text-white mb-3 capitalize">{profile?.plan || 'Free'} Plan</div>
-          {profile?.plan === 'free' && (
-            <button className="w-full py-2 bg-[#222] hover:bg-[#333] text-white text-xs font-bold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-[#39FF14]">
-              Upgrade Plan
-            </button>
-          )}
+      <aside
+        className={clsx(
+          'fixed md:relative inset-y-0 left-0 z-50 md:z-10 flex h-screen flex-col border-r border-[#222] bg-[#111111] transition-all duration-300 ease-in-out',
+          collapsed ? 'md:w-20' : 'md:w-64',
+          mobileOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
+        )}
+      >
+        <div className={clsx('flex items-center border-b border-[#222]', collapsed ? 'justify-center p-4' : 'justify-between p-5')}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#39FF14] shadow-[0_0_15px_rgba(57,255,20,0.3)]">
+              <Activity className="h-5 w-5 text-black" strokeWidth={2.5} />
+            </div>
+            {!collapsed && <span className="text-xl font-extrabold tracking-tight text-white">Surebet<span className="text-[#39FF14]">Pro</span></span>}
+          </div>
+          <button
+            onClick={onCloseMobile}
+            aria-label="Close navigation"
+            className="rounded-lg p-2 text-gray-400 hover:bg-[#1a1a1a] hover:text-white md:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
-        
-        <button 
-          onClick={signOut}
-          className="flex items-center gap-3 px-4 py-2 w-full rounded-xl text-sm font-medium text-gray-400 hover:bg-red-500/10 hover:text-red-500 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500"
-        >
-          <LogOut className="w-5 h-5" />
-          Sign Out
-        </button>
-      </div>
-    </aside>
+
+        <nav className="flex-1 space-y-1.5 overflow-y-auto px-3 py-5">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              onClick={onCloseMobile}
+              title={collapsed ? item.label : undefined}
+              className={({ isActive }) => clsx(
+                'flex items-center rounded-xl py-2.5 text-sm font-semibold transition-all duration-200',
+                collapsed ? 'justify-center px-2' : 'gap-3 px-4',
+                isActive ? 'bg-[#39FF14]/10 text-[#39FF14]' : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-white'
+              )}
+            >
+              <item.icon className="h-5 w-5 shrink-0 transition-colors" />
+              {!collapsed && <span className="truncate">{item.label}</span>}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className={clsx('space-y-3 border-t border-[#222] bg-[#0a0a0a]/50 p-3', collapsed && 'items-center')}>
+          {!collapsed && (
+            <div className="rounded-xl border border-[#333] bg-[#1a1a1a] p-4">
+              <div className="mb-1 truncate text-xs font-medium text-gray-500">{profile?.email}</div>
+              <div className="mb-3 text-sm font-bold capitalize text-white">{profile?.plan || 'Free'} Plan</div>
+              {profile?.plan === 'free' && (
+                <button className="w-full rounded-lg bg-[#222] py-2 text-xs font-bold text-white transition-all hover:bg-[#333] focus:outline-none focus:ring-2 focus:ring-[#39FF14]">
+                  Upgrade Plan
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={signOut}
+              title="Sign Out"
+              className={clsx('flex flex-1 items-center rounded-xl py-2 text-sm font-medium text-gray-400 transition-colors hover:bg-red-500/10 hover:text-red-500 focus:outline-none focus:ring-2 focus:ring-red-500', collapsed ? 'justify-center px-2' : 'gap-3 px-4')}
+            >
+              <LogOut className="h-5 w-5 shrink-0" />
+              {!collapsed && 'Sign Out'}
+            </button>
+            <button
+              onClick={onToggleCollapsed}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden rounded-xl p-2 text-gray-400 transition-colors hover:bg-[#1a1a1a] hover:text-white md:block"
+            >
+              {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+            </button>
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }
