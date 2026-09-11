@@ -24,6 +24,18 @@ interface NormalizedEvent {
   }[];
 }
 
+export interface LiveFootballMatch {
+  id: string;
+  league: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  status: string;
+  startTime: string;
+  minute: number | null;
+}
+
 export class OddsApiService {
   private async getApiConfig() {
     try {
@@ -125,6 +137,37 @@ export class OddsApiService {
       console.error('[OddsApiService] Error fetching live odds:', error.message);
       return [];
     }
+  }
+
+  public async getLiveFootballMatches(): Promise<LiveFootballMatch[]> {
+    try {
+      const liveEvents = await this.request('/events/live', {});
+      const footballEvents = (Array.isArray(liveEvents) ? liveEvents : []).filter((event: any) => {
+        const sport = `${event.sport?.slug || ''} ${event.sport?.name || ''}`.toLowerCase();
+        return sport.includes('soccer') || sport.includes('football');
+      });
+
+      return footballEvents.map((event: any) => ({
+        id: String(event.id),
+        league: event.league?.name || 'Football',
+        homeTeam: event.home || 'Home',
+        awayTeam: event.away || 'Away',
+        homeScore: this.toScore(event.homeScore ?? event.scores?.home ?? event.score?.home),
+        awayScore: this.toScore(event.awayScore ?? event.scores?.away ?? event.score?.away),
+        status: String(event.status || event.state || 'LIVE'),
+        startTime: event.date || event.startTime || new Date().toISOString(),
+        minute: this.toScore(event.minute ?? event.timer ?? event.clock?.minute),
+      }));
+    } catch (error: any) {
+      console.error('[OddsApiService] Error fetching live football matches:', error.message);
+      return [];
+    }
+  }
+
+  private toScore(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
   }
 
   private async getOddsForEvents(
