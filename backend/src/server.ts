@@ -30,22 +30,14 @@ app.get('/api/reports', async (_req, res) => { try { const stats = await sql`SEL
 app.get('/api/football/live', async (_req, res) => { try { const matches = await oddsApiService.getLiveFootballMatches(); res.json({ ok: true, updatedAt: new Date().toISOString(), count: matches.length, matches }); } catch (error) { const message = error instanceof Error ? error.message : 'Live football feed failed'; console.error('[Football] Live feed failed:', message); res.status(502).json({ ok: false, error: message, matches: [] }); } });
 app.get('/api/football/predictions', async (_req, res) => { try { const predictions = await aiPredictionService.getPredictions(40); const [rows] = await Promise.all([sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`]); const lastRunAt = rows?.[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).toISOString() : null; res.json({ ok: true, updatedAt: lastRunAt || new Date().toISOString(), count: predictions.length, predictions, analysisLastRunAt: lastRunAt, analysisLastRunStatus: rows?.[0]?.analysis_last_run_status ?? null }); } catch (error) { const message = error instanceof Error ? error.message : 'Match predictions failed'; console.error('[Football] AI prediction feed failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } });
 app.post('/api/football/analyze-now', async (_req, res) => { if (manualAnalysisRunning) return res.status(409).json({ ok: false, running: true, error: 'Football analysis is already running.' });
+  manualAnalysisRunning = true;
   try {
-    const rows = await sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`;
-    const lastRunAt = rows[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).getTime() : 0;
-    if (lastRunAt && Date.now() - lastRunAt < ANALYSIS_INTERVAL_MS) {
-      const predictions = await aiPredictionService.getPredictions(40);
-      const nextRunAt = new Date(lastRunAt + ANALYSIS_INTERVAL_MS).toISOString();
-      console.log(`[AI] Returning the shared analysis cycle to another user. Next new analysis is due at ${nextRunAt}.`);
-      return res.json({ ok: true, shared: true, count: predictions.length, predictions, completedAt: new Date(lastRunAt).toISOString(), nextRunAt, status: rows[0]?.analysis_last_run_status || 'success' });
-    }
-    manualAnalysisRunning = true;
-    console.log('[AI] Manual football analysis requested from dashboard for the shared 12-hour cycle, targeting up to 40 games.');
+    console.log('[AI] Manual football analysis requested from dashboard. Forcing a fresh shared cycle targeting up to 40 games.');
     const predictions = await aiPredictionService.runAutomaticAnalysis(40);
     const completedAt = new Date();
     await sql`UPDATE system_settings SET analysis_last_run_at = ${completedAt.toISOString()}, analysis_last_run_status = ${predictions.length ? 'success' : 'no_fixtures'} WHERE id = 1`;
     const nextRunAt = new Date(completedAt.getTime() + ANALYSIS_INTERVAL_MS).toISOString();
-    res.json({ ok: true, shared: false, count: predictions.length, predictions, completedAt: completedAt.toISOString(), nextRunAt, status: predictions.length ? 'success' : 'no_fixtures' });
+    res.json({ ok: true, shared: false, forced: true, count: predictions.length, predictions, completedAt: completedAt.toISOString(), nextRunAt, status: predictions.length ? 'success' : 'no_fixtures' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Manual football analysis failed';
     console.error('[AI] Manual analysis failed:', message);
