@@ -39,7 +39,7 @@ export class OddsApiService {
         endpoint: data?.api_endpoint_odds || '/odds',
       };
     } catch (error) {
-      console.error('[OddsApiService] Erro ao buscar configurações da API:', error);
+      console.error('[OddsApiService] Error loading API configuration:', error);
       return {
         key: process.env.ODDS_API_KEY || '',
         baseUrl: 'https://api.odds-api.io/v3',
@@ -50,7 +50,7 @@ export class OddsApiService {
 
   private async request(path: string, params: Record<string, string | number>) {
     const config = await this.getApiConfig();
-    if (!config.key) throw new Error('Nenhuma chave de API configurada.');
+    if (!config.key) throw new Error('No API key configured.');
 
     const response = await axios.get(`${config.baseUrl}${path}`, {
       params: { ...params, apiKey: config.key },
@@ -81,7 +81,7 @@ export class OddsApiService {
 
       return leagues;
     } catch (error: any) {
-      console.warn('[OddsApiService] Não foi possível carregar esportes/ligas:', error.message);
+      console.warn('[OddsApiService] Could not load sports/leagues:', error.message);
       return [];
     }
   }
@@ -120,7 +120,7 @@ export class OddsApiService {
 
       return results.filter(event => event.bookmakers.length >= 2);
     } catch (error: any) {
-      console.error(`[OddsApiService] Erro ao buscar odds para ${sportKey}/${leagueKey}:`, error.message);
+      console.error(`[OddsApiService] Error fetching odds for ${sportKey}/${leagueKey}:`, error.message);
       return [];
     }
   }
