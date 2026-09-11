@@ -6,12 +6,12 @@ import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [
   { icon: Activity, label: 'Live Scanner', path: '/' },
-  { icon: Target, label: 'Estratégia', path: '/strategy' },
-  { icon: Calculator, label: 'Calculadora', path: '/calculator' },
-  { icon: Bell, label: 'Meus Alertas', path: '/alerts' },
-  { icon: TrendingUp, label: 'Relatórios', path: '/reports' },
-  { icon: ShieldAlert, label: 'Admin (Motor)', path: '/admin' },
-  { icon: Settings, label: 'Configurações', path: '/settings' },
+  { icon: Target, label: 'Strategy', path: '/strategy' },
+  { icon: Calculator, label: 'Calculator', path: '/calculator' },
+  { icon: Bell, label: 'My Alerts', path: '/alerts' },
+  { icon: TrendingUp, label: 'Reports', path: '/reports' },
+  { icon: ShieldAlert, label: 'Admin (Engine)', path: '/admin' },
+  { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
 export function Sidebar() {
@@ -47,10 +47,10 @@ export function Sidebar() {
       <div className="p-4 border-t border-[#222] space-y-4 bg-[#0a0a0a]/50">
         <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-4">
           <div className="text-xs text-gray-500 mb-1 truncate font-medium">{profile?.email}</div>
-          <div className="text-sm font-bold text-white mb-3 capitalize">Plano {profile?.plan || 'Free'}</div>
+          <div className="text-sm font-bold text-white mb-3 capitalize">{profile?.plan || 'Free'} Plan</div>
           {profile?.plan === 'free' && (
             <button className="w-full py-2 bg-[#222] hover:bg-[#333] text-white text-xs font-bold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-[#39FF14]">
-              Fazer Upgrade
+              Upgrade Plan
             </button>
           )}
         </div>
@@ -60,7 +60,7 @@ export function Sidebar() {
           className="flex items-center gap-3 px-4 py-2 w-full rounded-xl text-sm font-medium text-gray-400 hover:bg-red-500/10 hover:text-red-500 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500"
         >
           <LogOut className="w-5 h-5" />
-          Sair da conta
+          Sign Out
         </button>
       </div>
     </aside>
