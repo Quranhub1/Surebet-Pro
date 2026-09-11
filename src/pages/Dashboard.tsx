@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Loader2, Radar } from 'lucide-react';
+import { Search, Loader2, Radar, Radio } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { OpportunityCard, OpportunityCardSkeleton } from '../components/OpportunityCard';
 import { CalculatorModal } from '../components/CalculatorModal';
@@ -30,9 +30,26 @@ interface Opportunity {
   surebet_legs: SurebetLeg[];
 }
 
+interface LiveFootballMatch {
+  id: string;
+  league: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  status: string;
+  startTime: string;
+  minute: number | null;
+}
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
 export function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [liveMatches, setLiveMatches] = useState<LiveFootballMatch[]>([]);
+  const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
+  const [liveLoading, setLiveLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,6 +66,34 @@ export function Dashboard() {
 
     return () => {
       supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchLiveMatches = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/football/live`);
+        if (!response.ok) throw new Error(`Live football feed returned ${response.status}`);
+        const payload = await response.json();
+        if (!cancelled) {
+          setLiveMatches(Array.isArray(payload.matches) ? payload.matches : []);
+          setLiveUpdatedAt(payload.updatedAt || new Date().toISOString());
+        }
+      } catch (error) {
+        console.error('Error fetching live football updates:', error);
+      } finally {
+        if (!cancelled) setLiveLoading(false);
+      }
+    };
+
+    fetchLiveMatches();
+    const timer = window.setInterval(fetchLiveMatches, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -104,10 +149,15 @@ export function Dashboard() {
     }
   };
 
+  const formatMatchStatus = (match: LiveFootballMatch) => {
+    if (match.minute !== null) return `${match.minute}'`;
+    return match.status.replace(/_/g, ' ');
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-6 md:p-10">
       <div className="w-full max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div className="flex-1 w-full">
             <h1 className="text-3xl font-extrabold text-white tracking-tight mb-1 flex items-center gap-3">
               Live Scanner
@@ -131,6 +181,44 @@ export function Dashboard() {
             />
           </div>
         </div>
+
+        <section className="mb-8 rounded-2xl border border-[#2c2e33] bg-[#111113] overflow-hidden shadow-lg">
+          <div className="px-5 py-4 border-b border-[#2c2e33] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center justify-center">
+                <Radio className="w-5 h-5 text-[#39FF14]" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold">Live Football</h2>
+                <p className="text-xs text-[#8b8d93]">Real match status and scores from the configured football data feed.</p>
+              </div>
+            </div>
+            <div className="text-xs text-[#8b8d93]">
+              {liveUpdatedAt ? `Updated ${new Date(liveUpdatedAt).toLocaleTimeString()}` : 'Waiting for live data...'}
+            </div>
+          </div>
+
+          {liveLoading ? (
+            <div className="p-6 flex items-center gap-3 text-sm text-[#8b8d93]"><Loader2 className="w-4 h-4 animate-spin" /> Loading live football...</div>
+          ) : liveMatches.length === 0 ? (
+            <div className="p-8 text-center text-sm text-[#8b8d93]">No football matches are live right now.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-px bg-[#2c2e33]">
+              {liveMatches.map(match => (
+                <div key={match.id} className="bg-[#111113] p-5 hover:bg-[#171719] transition-colors">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[11px] uppercase tracking-wide text-[#8b8d93] truncate pr-3">{match.league}</span>
+                    <span className="text-[11px] font-bold text-[#39FF14] flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#39FF14] animate-pulse" />{formatMatchStatus(match)}</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-4"><span className="font-semibold truncate">{match.homeTeam}</span><span className="text-xl font-extrabold">{match.homeScore ?? '-'}</span></div>
+                    <div className="flex items-center justify-between gap-4"><span className="font-semibold truncate">{match.awayTeam}</span><span className="text-xl font-extrabold">{match.awayScore ?? '-'}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {loading ? (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
