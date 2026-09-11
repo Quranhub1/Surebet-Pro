@@ -15,7 +15,6 @@ export class ScannerScheduler {
     this.isRunning = true;
     console.log('[Scanner] Automatic engine started. Full match generation runs every 12 hours.');
     console.log('[Scanner] Live odds refresh runs every 2 minutes for matches currently in progress.');
-
     await this.runFullScanIfDue();
     await this.refreshLiveMatches();
     await this.scheduleNextFullScan();
@@ -38,7 +37,6 @@ export class ScannerScheduler {
     } catch (error) {
       console.error('[Scanner] Could not calculate the next full scan time:', error);
     }
-
     console.log(`[Scanner] Next full match generation cycle in approximately ${(delay / 3600000).toFixed(1)} hours.`);
     this.fullScanTimer = setTimeout(async () => {
       await this.executeFullScan();
@@ -58,12 +56,8 @@ export class ScannerScheduler {
     try {
       const rows = await sql`SELECT last_run_at FROM system_settings WHERE id = 1`;
       const lastRunAt = rows[0]?.last_run_at ? new Date(rows[0].last_run_at).getTime() : 0;
-      if (!lastRunAt || Date.now() - lastRunAt >= FULL_SCAN_INTERVAL_MS) {
-        await this.executeFullScan();
-      } else {
-        const remainingHours = ((FULL_SCAN_INTERVAL_MS - (Date.now() - lastRunAt)) / 3600000).toFixed(1);
-        console.log(`[Scanner] Full scan already completed recently. Next cycle is due in approximately ${remainingHours} hours.`);
-      }
+      if (!lastRunAt || Date.now() - lastRunAt >= FULL_SCAN_INTERVAL_MS) await this.executeFullScan();
+      else console.log(`[Scanner] Full scan already completed recently. Next cycle is due in approximately ${((FULL_SCAN_INTERVAL_MS - (Date.now() - lastRunAt)) / 3600000).toFixed(1)} hours.`);
     } catch (error) {
       console.error('[Scanner] Could not determine the full scan schedule:', error);
       await this.executeFullScan();
@@ -71,22 +65,16 @@ export class ScannerScheduler {
   }
 
   private async executeFullScan(): Promise<void> {
-    const runDate = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date());
+    const runDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     let runStatus = 'success';
-
     try {
       const settings = await sql`SELECT min_roi FROM system_settings WHERE id = 1`;
       const minRoi = Number(settings[0]?.min_roi ?? 1);
       const { activeSportGroups, activeMarkets, activeBookmakers } = await this.getActiveConfiguration();
       console.log('[Scanner] Starting automatic 12-hour match generation cycle...');
-
-      if (activeBookmakers.length < 2) {
-        console.log('[Scanner] WARNING: Fewer than 2 active bookmakers. Arbitrage requires at least two.');
-      } else if (activeSportGroups.length === 0) {
-        console.log('[Scanner] No active sports configured. The automatic cycle will retry in 12 hours.');
-      } else {
+      if (activeBookmakers.length < 2) console.log('[Scanner] WARNING: Fewer than 2 active bookmakers. Arbitrage requires at least two.');
+      else if (activeSportGroups.length === 0) console.log('[Scanner] No active sports configured. The automatic cycle will retry in 12 hours.');
+      else {
         const leaguesToScan = await oddsApiService.getActiveLeagues(activeSportGroups);
         console.log(`[Scanner] Found ${leaguesToScan.length} active leagues to scan.`);
         for (const league of leaguesToScan) {
@@ -118,13 +106,11 @@ export class ScannerScheduler {
       const minRoi = Number(settings[0]?.min_roi ?? 1);
       const { activeSportGroups, activeMarkets, activeBookmakers } = await this.getActiveConfiguration();
       if (activeBookmakers.length < 2 || activeSportGroups.length === 0) return;
-
       const liveEvents = await oddsApiService.getLiveOdds(activeSportGroups, activeMarkets, activeBookmakers);
       if (liveEvents.length === 0) return;
-
       let updatedCount = 0;
       for (const event of liveEvents) {
-        await this.upsertEvent(event);
+        await this.upsertEvent({ id: event.id, sport_key: event.sport_key, league_title: event.league_title, home_team: event.home_team, away_team: event.away_team, commence_time: event.commence_time });
         for (const opportunity of ArbitrageEngine.analyzeEvent(event)) {
           if (opportunity.roi >= minRoi) {
             await this.saveOpportunityToDb(opportunity);
@@ -155,25 +141,22 @@ export class ScannerScheduler {
     await sql`
       INSERT INTO events (id, sport_key, league_title, home_team, away_team, commence_time)
       VALUES (${event.id}, ${event.sport_key}, ${event.league_title}, ${event.home_team}, ${event.away_team}, ${event.commence_time})
-      ON CONFLICT (id) DO UPDATE SET
-        sport_key = EXCLUDED.sport_key,
-        league_title = EXCLUDED.league_title,
-        home_team = EXCLUDED.home_team,
-        away_team = EXCLUDED.away_team,
-        commence_time = EXCLUDED.commence_time
+      ON CONFLICT (id) DO UPDATE SET sport_key = EXCLUDED.sport_key, league_title = EXCLUDED.league_title, home_team = EXCLUDED.home_team, away_team = EXCLUDED.away_team, commence_time = EXCLUDED.commence_time
     `;
   }
 
   private async saveOpportunityToDb(opportunity: SurebetOpportunity): Promise<void> {
     try {
-      await this.upsertEvent(opportunity);
-      const existing = await sql`
-        SELECT id FROM surebet_opportunities
-        WHERE event_id = ${opportunity.eventId} AND market_key = ${opportunity.marketKey} AND is_active = true
-        ORDER BY created_at DESC LIMIT 1
-      `;
+      await this.upsertEvent({
+        id: opportunity.eventId,
+        sport_key: opportunity.sportKey,
+        league_title: opportunity.leagueTitle,
+        home_team: opportunity.homeTeam,
+        away_team: opportunity.awayTeam,
+        commence_time: opportunity.commenceTime,
+      });
+      const existing = await sql`SELECT id FROM surebet_opportunities WHERE event_id = ${opportunity.eventId} AND market_key = ${opportunity.marketKey} AND is_active = true ORDER BY created_at DESC LIMIT 1`;
       const opportunityId = existing[0]?.id || newId();
-
       await sql`
         INSERT INTO surebet_opportunities (id, event_id, market_key, roi, profit, created_at, is_active)
         VALUES (${opportunityId}, ${opportunity.eventId}, ${opportunity.marketKey}, ${opportunity.roi}, ${opportunity.profit}, NOW(), true)
@@ -181,10 +164,7 @@ export class ScannerScheduler {
       `;
       await sql`DELETE FROM surebet_legs WHERE opportunity_id = ${opportunityId}`;
       for (const leg of opportunity.legs) {
-        await sql`
-          INSERT INTO surebet_legs (id, opportunity_id, outcome_name, bookmaker, price, stake_percentage)
-          VALUES (${newId()}, ${opportunityId}, ${leg.outcomeName}, ${leg.bookmaker}, ${leg.price}, ${leg.stakePercentage})
-        `;
+        await sql`INSERT INTO surebet_legs (id, opportunity_id, outcome_name, bookmaker, price, stake_percentage) VALUES (${newId()}, ${opportunityId}, ${leg.outcomeName}, ${leg.bookmaker}, ${leg.price}, ${leg.stakePercentage})`;
       }
     } catch (error) {
       console.error('[DB] Error saving opportunity to Neon:', error);
