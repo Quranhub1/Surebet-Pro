@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
@@ -10,15 +10,15 @@ import { Admin } from './pages/Admin';
 import { Auth } from './pages/Auth';
 import { Settings } from './pages/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Menu } from 'lucide-react';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#0a0a0a]">
-        <Loader2 className="w-8 h-8 text-[#39FF14] animate-spin" />
+      <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0a]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#39FF14]" />
       </div>
     );
   }
@@ -32,6 +32,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 function AppRoutes() {
   const { user } = useAuth();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   if (!user) {
     return (
@@ -43,9 +45,26 @@ function AppRoutes() {
   }
 
   return (
-    <div className="flex h-screen bg-[#0a0a0a] text-white font-sans overflow-hidden selection:bg-[#39FF14]/30 selection:text-[#39FF14]">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto relative">
+    <div className="flex h-screen min-h-0 bg-[#0a0a0a] font-sans text-white overflow-hidden selection:bg-[#39FF14]/30 selection:text-[#39FF14]">
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileMenuOpen}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+      />
+
+      <main className="relative min-w-0 flex-1 overflow-y-auto">
+        <div className="sticky top-0 z-30 flex h-14 items-center border-b border-[#222] bg-[#0a0a0a]/95 px-4 backdrop-blur md:hidden">
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open navigation"
+            className="rounded-lg p-2 text-gray-300 hover:bg-[#1a1a1a] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#39FF14]"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+          <span className="ml-3 text-lg font-extrabold tracking-tight">Surebet<span className="text-[#39FF14]">Pro</span></span>
+        </div>
+
         <Routes>
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/calculator" element={<ProtectedRoute><Calculator /></ProtectedRoute>} />
