@@ -28,23 +28,31 @@ app.delete('/api/alerts/:id', async (req, res) => { const userId = authUserId(re
 app.get('/api/reports', async (_req, res) => { try { const stats = await sql`SELECT COUNT(*)::int AS total, COALESCE(AVG(roi), 0)::float AS avg_roi, COALESCE(SUM(profit), 0)::float AS total_profit FROM surebet_opportunities WHERE is_active = true`; const daily = await sql`SELECT DATE(created_at) AS date, COUNT(*)::int AS opportunities, COALESCE(AVG(roi), 0)::float AS roi FROM surebet_opportunities WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY date`; res.json({ ok: true, stats: stats[0] || { total: 0, avg_roi: 0, total_profit: 0 }, daily }); } catch (error) { console.error('[API] Report query failed:', error); res.status(500).json({ error: 'Failed to load reports' }); } });
 
 app.get('/api/football/live', async (_req, res) => { try { const matches = await oddsApiService.getLiveFootballMatches(); res.json({ ok: true, updatedAt: new Date().toISOString(), count: matches.length, matches }); } catch (error) { const message = error instanceof Error ? error.message : 'Live football feed failed'; console.error('[Football] Live feed failed:', message); res.status(502).json({ ok: false, error: message, matches: [] }); } });
-app.get('/api/football/predictions', async (_req, res) => { try { const predictions = await aiPredictionService.getPredictions(40); const [rows] = await Promise.all([sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`]); const lastRunAt = rows?.[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).toISOString() : null; res.json({ ok: true, updatedAt: lastRunAt || new Date().toISOString(), count: predictions.length, predictions, analysisLastRunAt: lastRunAt, analysisLastRunStatus: rows?.[0]?.analysis_last_run_status ?? null }); } catch (error) { const message = error instanceof Error ? error.message : 'Match predictions failed'; console.error('[Football] AI prediction feed failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } });
+app.get('/api/football/predictions', async (_req, res) => { try {
+  const rows = await sql`SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at, p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.home_win, p.draw, p.away_win, p.under_over, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model FROM football_fixtures f LEFT JOIN football_ai_predictions p ON p.fixture_id = f.id WHERE f.kickoff_at >= NOW() - INTERVAL '2 hours' AND f.kickoff_at <= NOW() + INTERVAL '7 days' ORDER BY f.kickoff_at ASC LIMIT 40`;
+  const [settings] = await Promise.all([sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`]);
+  const lastRunAt = settings?.[0]?.analysis_last_run_at ? new Date(settings[0].analysis_last_run_at).toISOString() : null;
+  const predictions = rows.map((row: any) => ({ id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team, startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: row.confidence == null ? null : Number(row.confidence), homeWin: row.home_win == null ? null : Number(row.home_win), draw: row.draw == null ? null : Number(row.draw), awayWin: row.away_win == null ? null : Number(row.away_win), underOver: row.under_over || null, predictedHomeGoals: row.predicted_home_goals == null ? null : Number(row.predicted_home_goals), predictedAwayGoals: row.predicted_away_goals == null ? null : Number(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null }));
+  res.json({ ok: true, updatedAt: lastRunAt || new Date().toISOString(), count: predictions.length, predictions, analysisLastRunAt: lastRunAt, analysisLastRunStatus: settings?.[0]?.analysis_last_run_status ?? null, running: manualAnalysisRunning });
+} catch (error) { const message = error instanceof Error ? error.message : 'Match predictions failed'; console.error('[Football] AI prediction feed failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } });
+app.get('/api/football/analysis-status', async (_req, res) => { try { const [rows] = await Promise.all([sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`]); res.json({ ok: true, running: manualAnalysisRunning, lastRunAt: rows?.[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).toISOString() : null, status: rows?.[0]?.analysis_last_run_status ?? null }); } catch (error) { res.status(503).json({ ok: false, running: manualAnalysisRunning, status: 'unknown' }); } });
 app.post('/api/football/analyze-now', async (_req, res) => { if (manualAnalysisRunning) return res.status(409).json({ ok: false, running: true, error: 'Football analysis is already running.' });
   manualAnalysisRunning = true;
-  try {
-    console.log('[AI] Manual football analysis requested from dashboard. Forcing a fresh shared cycle targeting up to 40 games.');
-    const predictions = await aiPredictionService.runAutomaticAnalysis(40);
-    const completedAt = new Date();
-    await sql`UPDATE system_settings SET analysis_last_run_at = ${completedAt.toISOString()}, analysis_last_run_status = ${predictions.length ? 'success' : 'no_fixtures'} WHERE id = 1`;
-    const nextRunAt = new Date(completedAt.getTime() + ANALYSIS_INTERVAL_MS).toISOString();
-    res.json({ ok: true, shared: false, forced: true, count: predictions.length, predictions, completedAt: completedAt.toISOString(), nextRunAt, status: predictions.length ? 'success' : 'no_fixtures' });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Manual football analysis failed';
-    console.error('[AI] Manual analysis failed:', message);
-    res.status(502).json({ ok: false, error: message, predictions: [] });
-  } finally {
-    manualAnalysisRunning = false;
-  }
+  await sql`UPDATE system_settings SET analysis_last_run_status = 'running' WHERE id = 1`;
+  console.log('[AI] Manual football analysis requested from dashboard. Starting background analysis in batches of published games, targeting up to 40 games.');
+  void (async () => {
+    try {
+      const predictions = await aiPredictionService.runAutomaticAnalysis(40);
+      const completedAt = new Date();
+      await sql`UPDATE system_settings SET analysis_last_run_at = ${completedAt.toISOString()}, analysis_last_run_status = ${predictions.length ? 'success' : 'no_fixtures'} WHERE id = 1`;
+      console.log(`[AI] Background manual analysis finished: ${predictions.length}/40 predictions stored.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Manual football analysis failed';
+      console.error('[AI] Background manual analysis failed:', message);
+      await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = 'failed' WHERE id = 1`;
+    } finally { manualAnalysisRunning = false; }
+  })();
+  res.status(202).json({ ok: true, running: true, queued: true, batchSize: 5, target: 40, message: 'Football analysis started. Games and completed predictions will appear progressively.' });
 });
 app.get('/api/ai/models', (_req, res) => res.json({ active: getActiveAiConfig(), models: getAiModels() }));
 app.post('/api/ai/generate', async (req, res) => { try { const body = req.body as { provider?: AiProvider; prompt?: string; system?: string; temperature?: number; maxTokens?: number }; if (!body.prompt || typeof body.prompt !== 'string') return res.status(400).json({ error: 'prompt is required' }); if (body.provider && body.provider !== 'gemini' && body.provider !== 'groq') return res.status(400).json({ error: 'provider must be gemini or groq' }); const content = await generateWithAi(body); res.json({ ok: true, provider: body.provider || getActiveAiConfig().provider, content }); } catch (error) { const message = error instanceof Error ? error.message : 'AI generation failed'; console.error('[AI] Generation failed:', message); res.status(502).json({ error: message }); } });
