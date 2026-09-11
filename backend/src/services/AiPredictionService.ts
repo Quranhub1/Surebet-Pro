@@ -36,29 +36,40 @@ export class AiPredictionService {
     const dates = [this.formatDate(today), this.formatDate(new Date(today.getTime() + 86400000))];
     let fixtures: any[] = [];
     for (const date of dates) {
+      console.log(`[AI] Fetching upcoming football games for ${date}...`);
       const data = await this.requestFootball('/fixtures', { date });
       fixtures = Array.isArray(data.response) ? data.response.filter((fixture: any) => ['NS', 'TBD'].includes(String(fixture.fixture?.status?.short))) : [];
+      console.log(`[AI] ${date}: fetched ${fixtures.length} upcoming games.`);
       if (fixtures.length) break;
     }
 
     const selected = fixtures.slice(0, limit);
     if (!selected.length) {
+      console.log('[AI] No upcoming football games found for analysis.');
       this.cache = { expiresAt: Date.now() + 15 * 60 * 1000, data: [] };
       await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = 'no_fixtures' WHERE id = 1`;
       return [];
     }
 
+    console.log(`[AI] Selected ${selected.length} games for this analysis cycle:`);
+    selected.forEach((fixture: any, index: number) => {
+      const kickoff = fixture.fixture?.date ? new Date(fixture.fixture.date).toISOString() : 'unknown kickoff';
+      console.log(`[AI] Game ${index + 1}/${selected.length}: ${fixture.teams?.home?.name || 'Home'} vs ${fixture.teams?.away?.name || 'Away'} | ${fixture.league?.name || 'Football'} | kickoff ${kickoff} | fixture ${fixture.fixture?.id}`);
+    });
+
     await Promise.all(selected.map((fixture: any) => this.storeFixture(fixture)));
     await this.syncCompletedHistory(selected);
 
     const enriched: any[] = [];
-    for (const fixture of selected) {
+    for (const [index, fixture] of selected.entries()) {
       const base = this.normalizeFixture(fixture);
+      console.log(`[AI] Processing game ${index + 1}/${selected.length}: ${base.home} vs ${base.away} (fixture ${base.id})`);
       try {
         const predictionData = await this.requestFootball('/predictions', { fixture: base.id });
         const history = await this.getStoredHistory(base);
         const item = predictionData.response?.[0];
         const prediction = item?.predictions || {};
+        console.log(`[AI] API-Football prediction fetched for game ${index + 1}/${selected.length}: ${base.home} vs ${base.away}`);
         enriched.push({
           ...base,
           apiPrediction: { winner: prediction.winner?.name || null, winnerComment: prediction.winner?.comment || null, advice: prediction.advice || null, underOver: prediction.under_over || null, goals: prediction.goals || {}, percent: prediction.percent || {}, winOrDraw: prediction.win_or_draw ?? null },
@@ -104,6 +115,7 @@ export class AiPredictionService {
       };
       results.push(prediction);
       const context = enriched.find((entry: any) => entry.id === prediction.id);
+      console.log(`[AI] Prediction generated ${results.length}: ${prediction.homeTeam} vs ${prediction.awayTeam} | winner: ${prediction.winner || 'undecided'} | confidence: ${prediction.confidence ?? 'n/a'}%`);
       await this.storePrediction(prediction, context);
     }
 
@@ -161,7 +173,7 @@ export class AiPredictionService {
 
   private parseJson(raw: string): any { const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim(); try { return JSON.parse(cleaned); } catch { const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}'); if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)); throw new Error('AI returned invalid football analysis JSON'); } }
   private stringOrNull(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null; }
-  private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%','')); return Number.isFinite(n) ? n : null; }
+  private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%', '').trim()); return Number.isFinite(n) ? n : null; }
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
 }
 
