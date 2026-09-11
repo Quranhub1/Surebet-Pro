@@ -25,11 +25,7 @@ export class AiPredictionService {
     return response.data;
   }
 
-  private async requestFootballWithFreePlanThrottle(path: string, params: Record<string, string | number>) {
-    const result = await this.requestFootball(path, params);
-    await this.sleep(FREE_PLAN_MINUTE_DELAY_MS);
-    return result;
-  }
+  private async sleep(ms: number): Promise<void> { await new Promise(resolve => setTimeout(resolve, ms)); }
 
   public async runAutomaticAnalysis(limit = 8): Promise<AiMatchPrediction[]> {
     const aiConfig = getActiveAiConfig();
@@ -127,23 +123,16 @@ export class AiPredictionService {
   private async syncCompletedHistory(selected: any[]): Promise<void> {
     const teamIds = new Set(selected.flatMap((fixture: any) => [fixture.teams?.home?.id, fixture.teams?.away?.id]).filter(Boolean).map(Number));
     if (!teamIds.size) return;
-
     const from = this.formatDate(new Date(Date.now() - 14 * 86400000));
     const to = this.formatDate(new Date(Date.now() - 86400000));
     try {
-      // The free API-Football plan rejects the `last` fixture parameter even though
-      // the public examples document it. Use one date-range request instead, then
-      // filter locally. This also avoids firing 16 requests in parallel and hitting
-      // the free plan's 10 requests/minute rate limit.
       const data = await this.requestFootball('/fixtures', { from, to });
-      const completed = Array.isArray(data.response)
-        ? data.response.filter((fixture: any) => {
-            const status = String(fixture.fixture?.status?.short);
-            const homeId = Number(fixture.teams?.home?.id);
-            const awayId = Number(fixture.teams?.away?.id);
-            return ['FT', 'AET', 'PEN'].includes(status) && (teamIds.has(homeId) || teamIds.has(awayId));
-          })
-        : [];
+      const completed = Array.isArray(data.response) ? data.response.filter((fixture: any) => {
+        const status = String(fixture.fixture?.status?.short);
+        const homeId = Number(fixture.teams?.home?.id);
+        const awayId = Number(fixture.teams?.away?.id);
+        return ['FT', 'AET', 'PEN'].includes(status) && (teamIds.has(homeId) || teamIds.has(awayId));
+      }) : [];
       await Promise.all(completed.map((fixture: any) => this.storeFixture(fixture)));
       console.log(`[AI] Stored ${completed.length} completed historical games for the selected teams.`);
     } catch (error) {
@@ -174,7 +163,6 @@ export class AiPredictionService {
   private stringOrNull(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null; }
   private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%','')); return Number.isFinite(n) ? n : null; }
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
-  private sleep(ms: number): Promise<void> { return new Promise(resolve => setTimeout(resolve, ms)); }
 }
 
 export const aiPredictionService = new AiPredictionService();
