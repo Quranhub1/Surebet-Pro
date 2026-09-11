@@ -35,12 +35,8 @@ export function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Modal State
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // Scanner State
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
   const [scanError, setScanError] = useState('');
@@ -91,7 +87,7 @@ export function Dashboard() {
       if (error) throw error;
       setOpportunities((data as unknown as Opportunity[]) || []);
     } catch (error) {
-      console.error('Erro ao buscar oportunidades:', error);
+      console.error('Error fetching opportunities:', error);
     } finally {
       setLoading(false);
     }
@@ -100,15 +96,15 @@ export function Dashboard() {
   const handleManualScan = async () => {
     if (isScanning) return;
     setIsScanning(true);
-    setScanStatus('Iniciando motor...');
+    setScanStatus('Starting scanner...');
     setScanError('');
     
     try {
       const found = await runManualScan((status) => setScanStatus(status));
       if (found > 0) {
-        setScanStatus(`Sucesso! ${found} novas oportunidades.`);
+        setScanStatus(`Success! ${found} new opportunities found.`);
       } else {
-        setScanStatus('Nenhuma oportunidade com o ROI mínimo encontrada.');
+        setScanStatus('No opportunities meeting the minimum ROI were found.');
       }
       setTimeout(() => {
         setIsScanning(false);
@@ -139,12 +135,10 @@ export function Dashboard() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-6 md:p-10">
       <div className="w-full max-w-7xl mx-auto">
-        {/* Header Section */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
           <div className="flex-1 w-full">
             <h1 className="text-3xl font-extrabold text-white tracking-tight mb-1 flex items-center gap-3 flex-wrap">
               Live Scanner
-              
               {isScanning && scanStatus && (
                 <span className="text-xs font-bold bg-[#39FF14]/10 text-[#39FF14] px-3 py-1 rounded-full border border-[#39FF14]/20 animate-pulse flex items-center gap-2">
                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -152,9 +146,7 @@ export function Dashboard() {
                 </span>
               )}
             </h1>
-            <p className="text-[#8b8d93] text-sm font-medium mb-3">Monitoramento em tempo real de arbitragem.</p>
-            
-            {/* Badge de Erro Melhorada - Permite quebra de linha para ler o erro completo da API */}
+            <p className="text-[#8b8d93] text-sm font-medium mb-3">Real-time arbitrage monitoring.</p>
             {scanError && (
               <div className="text-xs font-bold bg-red-500/10 text-red-500 px-4 py-3 rounded-xl border border-red-500/20 flex items-start gap-3 animate-in fade-in slide-in-from-left-2 w-full max-w-3xl">
                 <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -168,7 +160,7 @@ export function Dashboard() {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8b8d93]" />
               <input 
                 type="text" 
-                placeholder="Buscar times ou ligas..." 
+                placeholder="Search teams or leagues..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-[#161618] border border-[#2c2e33] text-white text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#39FF14] focus:border-transparent transition-all placeholder-[#4a4d55]"
@@ -180,17 +172,12 @@ export function Dashboard() {
               disabled={isScanning}
               className="bg-[#1a2e15] hover:bg-[#223d1c] border border-[#2a4a22] text-[#39FF14] px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(57,255,20,0.1)] hover:shadow-[0_0_20px_rgba(57,255,20,0.2)] whitespace-nowrap"
             >
-              {isScanning ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Radar className="w-4 h-4" />
-              )}
-              {isScanning ? 'Escaneando...' : 'Escanear Agora'}
+              {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radar className="w-4 h-4" />}
+              {isScanning ? 'Scanning...' : 'Scan Now'}
             </button>
           </div>
         </div>
 
-        {/* Status Message */}
         {!isScanning && scanStatus && !scanError && (
           <div className="mb-6 bg-[#161618] border border-[#2c2e33] rounded-xl p-4 text-sm text-gray-300 flex items-center gap-3 animate-in fade-in">
             <AlertCircle className="w-5 h-5 text-[#39FF14]" />
@@ -198,7 +185,6 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* Content Section */}
         {loading ? (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {[1, 2, 3, 4].map(i => <OpportunityCardSkeleton key={i} />)}
@@ -209,9 +195,9 @@ export function Dashboard() {
               <div className="w-16 h-16 bg-[#252529] rounded-full flex items-center justify-center mb-4 border border-[#333]">
                 <Radar className="w-8 h-8 text-[#555]" />
               </div>
-              <p className="text-xl font-bold text-white mb-2">Nenhuma Surebet encontrada no momento</p>
+              <p className="text-xl font-bold text-white mb-2">No surebets found right now</p>
               <p className="text-sm max-w-md text-center leading-relaxed mb-6">
-                O mercado é dinâmico. Clique no botão "Escanear Agora" para forçar uma varredura nas casas de apostas ativas.
+                The market is dynamic. Click "Scan Now" to force a scan across the active bookmakers.
               </p>
               <button 
                 onClick={handleManualScan}
@@ -219,7 +205,7 @@ export function Dashboard() {
                 className="bg-[#39FF14] text-black px-6 py-3 rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 hover:bg-[#6BFF4D] transition-all disabled:opacity-50 shadow-[0_0_15px_rgba(57,255,20,0.3)]"
               >
                 {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radar className="w-4 h-4" />}
-                Escanear Mercado Agora
+                Scan Market Now
               </button>
             </div>
           </div>
