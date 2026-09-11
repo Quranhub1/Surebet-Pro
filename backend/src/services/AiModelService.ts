@@ -29,7 +29,7 @@ function getProvider(): AiProvider {
 
 function getApiKey(provider: AiProvider): string {
   if (provider === 'gemini') {
-    return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+    return process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY || '';
   }
 
   return process.env.GROQ_API_KEY || '';
