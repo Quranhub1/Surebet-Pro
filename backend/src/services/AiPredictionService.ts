@@ -11,6 +11,7 @@ export interface AiMatchPrediction {
 }
 
 const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
+const FREE_PLAN_MINUTE_DELAY_MS = 6500;
 
 export class AiPredictionService {
   private cache: { expiresAt: number; data: AiMatchPrediction[] } | null = null;
@@ -22,6 +23,12 @@ export class AiPredictionService {
     const errors = response.data?.errors;
     if (errors && ((Array.isArray(errors) && errors.length) || Object.keys(errors).length)) throw new Error(Array.isArray(errors) ? errors.join('; ') : Object.values(errors).join('; '));
     return response.data;
+  }
+
+  private async requestFootballWithFreePlanThrottle(path: string, params: Record<string, string | number>) {
+    const result = await this.requestFootball(path, params);
+    await this.sleep(FREE_PLAN_MINUTE_DELAY_MS);
+    return result;
   }
 
   public async runAutomaticAnalysis(limit = 8): Promise<AiMatchPrediction[]> {
@@ -48,27 +55,28 @@ export class AiPredictionService {
     await Promise.all(selected.map((fixture: any) => this.storeFixture(fixture)));
     await this.syncCompletedHistory(selected);
 
-    const enriched = await Promise.all(selected.map(async (fixture: any) => {
+    const enriched: any[] = [];
+    for (const fixture of selected) {
       const base = this.normalizeFixture(fixture);
       try {
-        const [predictionData, history] = await Promise.all([
-          this.requestFootball('/predictions', { fixture: base.id }),
-          this.getStoredHistory(base),
-        ]);
+        const predictionData = await this.requestFootball('/predictions', { fixture: base.id });
+        const history = await this.getStoredHistory(base);
         const item = predictionData.response?.[0];
         const prediction = item?.predictions || {};
-        return {
+        enriched.push({
           ...base,
           apiPrediction: { winner: prediction.winner?.name || null, winnerComment: prediction.winner?.comment || null, advice: prediction.advice || null, underOver: prediction.under_over || null, goals: prediction.goals || {}, percent: prediction.percent || {}, winOrDraw: prediction.win_or_draw ?? null },
           comparison: item?.comparison || {},
           h2h: Array.isArray(item?.h2h) ? item.h2h.slice(0, 5).map((match: any) => ({ date: match.fixture?.date || null, home: match.teams?.home?.name || null, away: match.teams?.away?.name || null, homeGoals: match.goals?.home ?? null, awayGoals: match.goals?.away ?? null })) : [],
           storedHistory: history,
-        };
+        });
+        await this.sleep(FREE_PLAN_MINUTE_DELAY_MS);
       } catch (error) {
         console.warn(`[AI] Limited analysis context for fixture ${base.id}:`, error instanceof Error ? error.message : error);
-        return { ...base, apiPrediction: null, comparison: {}, h2h: [], storedHistory: await this.getStoredHistory(base) };
+        enriched.push({ ...base, apiPrediction: null, comparison: {}, h2h: [], storedHistory: await this.getStoredHistory(base) });
+        await this.sleep(FREE_PLAN_MINUTE_DELAY_MS);
       }
-    }));
+    }
 
     const system = `You are SureBet Pro's football analysis AI. Your sole job is football analysis, not betting. Never mention bookmakers, odds, stakes, ROI, arbitrage, gambling or betting advice. Analyze the supplied API-Football forecast, comparison signals, head-to-head context and the stored database history. The stored completed games are persistent evidence and MUST be considered when available. Do not invent injuries, lineups, statistics, form or results. If evidence is weak, say so and lower confidence. Return ONLY valid JSON with a top-level predictions array. Each prediction must contain id, winner, advice, analysis, keyFactors, confidence, homeWin, draw, awayWin, underOver, predictedHomeGoals, predictedAwayGoals. analysis must be 2-4 sentences explaining the reasoning. keyFactors must contain 3-6 short evidence-based points. confidence is 0-100. Probabilities are 0-100 and should sum to approximately 100.`;
     const prompt = `Analyze these upcoming football fixtures. The API-Football forecast is an input, not the final answer. Reconcile it with comparison signals, H2H and the historical games already stored in our database, then make your own reasoned prediction.\n\n${JSON.stringify(enriched, null, 2)}`;
@@ -117,14 +125,30 @@ export class AiPredictionService {
   }
 
   private async syncCompletedHistory(selected: any[]): Promise<void> {
-    const ids = [...new Set(selected.flatMap((fixture: any) => [fixture.teams?.home?.id, fixture.teams?.away?.id]).filter(Boolean))].slice(0, 16);
-    await Promise.all(ids.map(async (teamId) => {
-      try {
-        const data = await this.requestFootball('/fixtures', { team: Number(teamId), last: 5 });
-        const completed = Array.isArray(data.response) ? data.response.filter((fixture: any) => ['FT', 'AET', 'PEN'].includes(String(fixture.fixture?.status?.short))) : [];
-        await Promise.all(completed.map((fixture: any) => this.storeFixture(fixture)));
-      } catch (error) { console.warn(`[AI] Could not sync history for team ${teamId}:`, error instanceof Error ? error.message : error); }
-    }));
+    const teamIds = new Set(selected.flatMap((fixture: any) => [fixture.teams?.home?.id, fixture.teams?.away?.id]).filter(Boolean).map(Number));
+    if (!teamIds.size) return;
+
+    const from = this.formatDate(new Date(Date.now() - 14 * 86400000));
+    const to = this.formatDate(new Date(Date.now() - 86400000));
+    try {
+      // The free API-Football plan rejects the `last` fixture parameter even though
+      // the public examples document it. Use one date-range request instead, then
+      // filter locally. This also avoids firing 16 requests in parallel and hitting
+      // the free plan's 10 requests/minute rate limit.
+      const data = await this.requestFootball('/fixtures', { from, to });
+      const completed = Array.isArray(data.response)
+        ? data.response.filter((fixture: any) => {
+            const status = String(fixture.fixture?.status?.short);
+            const homeId = Number(fixture.teams?.home?.id);
+            const awayId = Number(fixture.teams?.away?.id);
+            return ['FT', 'AET', 'PEN'].includes(status) && (teamIds.has(homeId) || teamIds.has(awayId));
+          })
+        : [];
+      await Promise.all(completed.map((fixture: any) => this.storeFixture(fixture)));
+      console.log(`[AI] Stored ${completed.length} completed historical games for the selected teams.`);
+    } catch (error) {
+      console.warn('[AI] Could not sync completed history:', error instanceof Error ? error.message : error);
+    }
   }
 
   private async storeFixture(fixture: any): Promise<void> {
@@ -150,6 +174,7 @@ export class AiPredictionService {
   private stringOrNull(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null; }
   private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%','')); return Number.isFinite(n) ? n : null; }
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
+  private sleep(ms: number): Promise<void> { return new Promise(resolve => setTimeout(resolve, ms)); }
 }
 
 export const aiPredictionService = new AiPredictionService();
