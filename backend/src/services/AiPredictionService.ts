@@ -41,11 +41,12 @@ export class AiPredictionService {
     const selected = fixtures.slice(0, limit);
     if (!selected.length) {
       this.cache = { expiresAt: Date.now() + 15 * 60 * 1000, data: [] };
-      await sql`UPDATE system_settings SET last_run_at = NOW(), last_run_status = 'no_fixtures' WHERE id = 1`;
+      await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = 'no_fixtures' WHERE id = 1`;
       return [];
     }
 
     await Promise.all(selected.map((fixture: any) => this.storeFixture(fixture)));
+    await this.syncCompletedHistory(selected);
 
     const enriched = await Promise.all(selected.map(async (fixture: any) => {
       const base = this.normalizeFixture(fixture);
@@ -58,15 +59,7 @@ export class AiPredictionService {
         const prediction = item?.predictions || {};
         return {
           ...base,
-          apiPrediction: {
-            winner: prediction.winner?.name || null,
-            winnerComment: prediction.winner?.comment || null,
-            advice: prediction.advice || null,
-            underOver: prediction.under_over || null,
-            goals: prediction.goals || {},
-            percent: prediction.percent || {},
-            winOrDraw: prediction.win_or_draw ?? null,
-          },
+          apiPrediction: { winner: prediction.winner?.name || null, winnerComment: prediction.winner?.comment || null, advice: prediction.advice || null, underOver: prediction.under_over || null, goals: prediction.goals || {}, percent: prediction.percent || {}, winOrDraw: prediction.win_or_draw ?? null },
           comparison: item?.comparison || {},
           h2h: Array.isArray(item?.h2h) ? item.h2h.slice(0, 5).map((match: any) => ({ date: match.fixture?.date || null, home: match.teams?.home?.name || null, away: match.teams?.away?.name || null, homeGoals: match.goals?.home ?? null, awayGoals: match.goals?.away ?? null })) : [],
           storedHistory: history,
@@ -97,66 +90,56 @@ export class AiPredictionService {
     const parsed = this.parseJson(raw);
     const byId = new Map(selected.map((fixture: any) => [String(fixture.fixture?.id), fixture]));
     const results: AiMatchPrediction[] = [];
-
     for (const item of Array.isArray(parsed.predictions) ? parsed.predictions : []) {
       const fixture = byId.get(String(item?.id));
       if (!fixture) continue;
       const prediction: AiMatchPrediction = {
-        id: String(fixture.fixture?.id),
-        league: fixture.league?.name || 'Football', homeTeam: fixture.teams?.home?.name || 'Home', awayTeam: fixture.teams?.away?.name || 'Away', startTime: fixture.fixture?.date || new Date().toISOString(),
+        id: String(fixture.fixture?.id), league: fixture.league?.name || 'Football', homeTeam: fixture.teams?.home?.name || 'Home', awayTeam: fixture.teams?.away?.name || 'Away', startTime: fixture.fixture?.date || new Date().toISOString(),
         winner: item?.winner === fixture.teams?.home?.name || item?.winner === fixture.teams?.away?.name ? item.winner : null,
-        advice: this.stringOrNull(item?.advice), analysis: this.stringOrNull(item?.analysis),
-        keyFactors: Array.isArray(item?.keyFactors) ? item.keyFactors.filter((value: unknown): value is string => typeof value === 'string').slice(0, 6) : [],
-        confidence: this.toNumber(item?.confidence), homeWin: this.toNumber(item?.homeWin), draw: this.toNumber(item?.draw), awayWin: this.toNumber(item?.awayWin),
-        underOver: this.stringOrNull(item?.underOver), predictedHomeGoals: this.toNumber(item?.predictedHomeGoals), predictedAwayGoals: this.toNumber(item?.predictedAwayGoals), aiProvider: usedProvider, aiModel: usedModel,
+        advice: this.stringOrNull(item?.advice), analysis: this.stringOrNull(item?.analysis), keyFactors: Array.isArray(item?.keyFactors) ? item.keyFactors.filter((value: unknown): value is string => typeof value === 'string').slice(0, 6) : [], confidence: this.toNumber(item?.confidence), homeWin: this.toNumber(item?.homeWin), draw: this.toNumber(item?.draw), awayWin: this.toNumber(item?.awayWin), underOver: this.stringOrNull(item?.underOver), predictedHomeGoals: this.toNumber(item?.predictedHomeGoals), predictedAwayGoals: this.toNumber(item?.predictedAwayGoals), aiProvider: usedProvider, aiModel: usedModel,
       };
       results.push(prediction);
-      await this.storePrediction(prediction, enriched.find((entry: any) => entry.id === prediction.id));
+      const context = enriched.find((entry: any) => entry.id === prediction.id);
+      await this.storePrediction(prediction, context);
     }
 
     this.cache = { expiresAt: Date.now() + 60 * 60 * 1000, data: results };
-    await sql`UPDATE system_settings SET last_run_date = ${this.kampalaDate()}, last_run_at = NOW(), last_run_status = ${results.length ? 'success' : 'ai_empty'} WHERE id = 1`;
     console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using ${usedProvider}/${usedModel}.`);
     return results;
   }
 
   public async getPredictions(limit = 8): Promise<AiMatchPrediction[]> {
     if (this.cache && this.cache.expiresAt > Date.now()) return this.cache.data.slice(0, limit);
-    const rows = await sql`
-      SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at, p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.home_win, p.draw, p.away_win, p.under_over, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model
-      FROM football_fixtures f JOIN football_ai_predictions p ON p.fixture_id = f.id
-      WHERE f.kickoff_at >= NOW() - INTERVAL '2 hours' AND f.kickoff_at <= NOW() + INTERVAL '48 hours'
-      ORDER BY f.kickoff_at ASC LIMIT ${limit}`;
+    const rows = await sql`SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at, p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.home_win, p.draw, p.away_win, p.under_over, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model FROM football_fixtures f JOIN football_ai_predictions p ON p.fixture_id = f.id WHERE f.kickoff_at >= NOW() - INTERVAL '2 hours' AND f.kickoff_at <= NOW() + INTERVAL '48 hours' ORDER BY f.kickoff_at ASC LIMIT ${limit}`;
     const data = rows.map((row: any) => ({ id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team, startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: this.toNumber(row.confidence), homeWin: this.toNumber(row.home_win), draw: this.toNumber(row.draw), awayWin: this.toNumber(row.away_win), underOver: row.under_over || null, predictedHomeGoals: this.toNumber(row.predicted_home_goals), predictedAwayGoals: this.toNumber(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null }));
     if (data.length) this.cache = { expiresAt: Date.now() + 30 * 60 * 1000, data };
     return data;
   }
 
+  private async syncCompletedHistory(selected: any[]): Promise<void> {
+    const ids = [...new Set(selected.flatMap((fixture: any) => [fixture.teams?.home?.id, fixture.teams?.away?.id]).filter(Boolean))].slice(0, 16);
+    await Promise.all(ids.map(async (teamId) => {
+      try {
+        const data = await this.requestFootball('/fixtures', { team: Number(teamId), last: 5 });
+        const completed = Array.isArray(data.response) ? data.response.filter((fixture: any) => ['FT', 'AET', 'PEN'].includes(String(fixture.fixture?.status?.short))) : [];
+        await Promise.all(completed.map((fixture: any) => this.storeFixture(fixture)));
+      } catch (error) { console.warn(`[AI] Could not sync history for team ${teamId}:`, error instanceof Error ? error.message : error); }
+    }));
+  }
+
   private async storeFixture(fixture: any): Promise<void> {
     const f = this.normalizeFixture(fixture);
-    await sql`
-      INSERT INTO football_fixtures (id, league_id, league_name, country, season, home_team_id, home_team, away_team_id, away_team, kickoff_at, status, home_score, away_score, raw_data, updated_at)
-      VALUES (${f.id}, ${f.leagueId}, ${f.league}, ${f.country}, ${f.season}, ${f.homeId}, ${f.home}, ${f.awayId}, ${f.away}, ${f.kickoff}, ${f.status}, ${f.homeScore}, ${f.awayScore}, ${JSON.stringify(fixture)}, NOW())
-      ON CONFLICT (id) DO UPDATE SET league_id=EXCLUDED.league_id, league_name=EXCLUDED.league_name, country=EXCLUDED.country, season=EXCLUDED.season, home_team_id=EXCLUDED.home_team_id, home_team=EXCLUDED.home_team, away_team_id=EXCLUDED.away_team_id, away_team=EXCLUDED.away_team, kickoff_at=EXCLUDED.kickoff_at, status=EXCLUDED.status, home_score=EXCLUDED.home_score, away_score=EXCLUDED.away_score, raw_data=EXCLUDED.raw_data, updated_at=NOW()`;
+    await sql`INSERT INTO football_fixtures (id, league_id, league_name, country, season, home_team_id, home_team, away_team_id, away_team, kickoff_at, status, home_score, away_score, raw_data, updated_at) VALUES (${f.id}, ${f.leagueId}, ${f.league}, ${f.country}, ${f.season}, ${f.homeId}, ${f.home}, ${f.awayId}, ${f.away}, ${f.kickoff}, ${f.status}, ${f.homeScore}, ${f.awayScore}, ${JSON.stringify(fixture)}, NOW()) ON CONFLICT (id) DO UPDATE SET league_id=EXCLUDED.league_id, league_name=EXCLUDED.league_name, country=EXCLUDED.country, season=EXCLUDED.season, home_team_id=EXCLUDED.home_team_id, home_team=EXCLUDED.home_team, away_team_id=EXCLUDED.away_team_id, away_team=EXCLUDED.away_team, kickoff_at=EXCLUDED.kickoff_at, status=EXCLUDED.status, home_score=EXCLUDED.home_score, away_score=EXCLUDED.away_score, raw_data=EXCLUDED.raw_data, updated_at=NOW()`;
   }
 
   private async storePrediction(prediction: AiMatchPrediction, context: any): Promise<void> {
-    await sql`
-      INSERT INTO football_ai_predictions (fixture_id, winner, advice, analysis, key_factors, confidence, home_win, draw, away_win, under_over, predicted_home_goals, predicted_away_goals, ai_provider, ai_model, source_prediction, updated_at)
-      VALUES (${prediction.id}, ${prediction.winner}, ${prediction.advice}, ${prediction.analysis}, ${JSON.stringify(prediction.keyFactors)}, ${prediction.confidence}, ${prediction.homeWin}, ${prediction.draw}, ${prediction.awayWin}, ${prediction.underOver}, ${prediction.predictedHomeGoals}, ${prediction.predictedAwayGoals}, ${prediction.aiProvider}, ${prediction.aiModel}, ${JSON.stringify(context?.apiPrediction || null)}, NOW())
-      ON CONFLICT (fixture_id) DO UPDATE SET winner=EXCLUDED.winner, advice=EXCLUDED.advice, analysis=EXCLUDED.analysis, key_factors=EXCLUDED.key_factors, confidence=EXCLUDED.confidence, home_win=EXCLUDED.home_win, draw=EXCLUDED.draw, away_win=EXCLUDED.away_win, under_over=EXCLUDED.under_over, predicted_home_goals=EXCLUDED.predicted_home_goals, predicted_away_goals=EXCLUDED.predicted_away_goals, ai_provider=EXCLUDED.ai_provider, ai_model=EXCLUDED.ai_model, source_prediction=EXCLUDED.source_prediction, updated_at=NOW()`;
+    await sql`INSERT INTO football_ai_predictions (fixture_id, winner, advice, analysis, key_factors, confidence, home_win, draw, away_win, under_over, predicted_home_goals, predicted_away_goals, ai_provider, ai_model, source_prediction, updated_at) VALUES (${prediction.id}, ${prediction.winner}, ${prediction.advice}, ${prediction.analysis}, ${JSON.stringify(prediction.keyFactors)}, ${prediction.confidence}, ${prediction.homeWin}, ${prediction.draw}, ${prediction.awayWin}, ${prediction.underOver}, ${prediction.predictedHomeGoals}, ${prediction.predictedAwayGoals}, ${prediction.aiProvider}, ${prediction.aiModel}, ${JSON.stringify(context?.apiPrediction || null)}, NOW()) ON CONFLICT (fixture_id) DO UPDATE SET winner=EXCLUDED.winner, advice=EXCLUDED.advice, analysis=EXCLUDED.analysis, key_factors=EXCLUDED.key_factors, confidence=EXCLUDED.confidence, home_win=EXCLUDED.home_win, draw=EXCLUDED.draw, away_win=EXCLUDED.away_win, under_over=EXCLUDED.under_over, predicted_home_goals=EXCLUDED.predicted_home_goals, predicted_away_goals=EXCLUDED.predicted_away_goals, ai_provider=EXCLUDED.ai_provider, ai_model=EXCLUDED.ai_model, source_prediction=EXCLUDED.source_prediction, updated_at=NOW()`;
   }
 
   private async getStoredHistory(fixture: any) {
-    const homeId = fixture.homeId ?? null;
-    const awayId = fixture.awayId ?? null;
+    const homeId = fixture.homeId ?? null; const awayId = fixture.awayId ?? null;
     if (!homeId && !awayId) return [];
-    return sql`
-      SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score
-      FROM football_fixtures
-      WHERE kickoff_at < ${fixture.kickoff} AND status IN ('FT','AET','PEN')
-        AND (home_team_id IN (${homeId}, ${awayId}) OR away_team_id IN (${homeId}, ${awayId}))
-      ORDER BY kickoff_at DESC LIMIT 12`;
+    return sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${fixture.kickoff} AND status IN ('FT','AET','PEN') AND (home_team_id IN (${homeId}, ${awayId}) OR away_team_id IN (${homeId}, ${awayId})) ORDER BY kickoff_at DESC LIMIT 12`;
   }
 
   private normalizeFixture(item: any) {
@@ -167,7 +150,6 @@ export class AiPredictionService {
   private stringOrNull(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null; }
   private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%','')); return Number.isFinite(n) ? n : null; }
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
-  private kampalaDate(): string { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 }
 
 export const aiPredictionService = new AiPredictionService();
