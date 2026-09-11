@@ -31,13 +31,13 @@ export class ScannerScheduler {
   private hasTriggeredToday = false;
 
   constructor() {
-    console.log('[Scanner] Inicializado. Aguardando agendamento...');
+    console.log('[Scanner] Initialized. Waiting for schedule...');
   }
 
   public async start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    console.log('[Scanner] Motor de busca ativado.');
+    console.log('[Scanner] Search engine activated.');
     void this.runCycle();
   }
 
@@ -61,7 +61,7 @@ export class ScannerScheduler {
         const minRoi = settings?.min_roi ?? 1.0;
 
         if (!schedulerEnabled) {
-          console.log('[Scanner] Aguardando agendamento...');
+          console.log('[Scanner] Waiting for schedule...');
           await this.sleep(60000);
           continue;
         }
@@ -77,7 +77,7 @@ export class ScannerScheduler {
 
         await this.sleep(60000);
       } catch (error) {
-        console.error('[Scanner] Erro crítico no ciclo:', error);
+        console.error('[Scanner] Critical error in scheduler cycle:', error);
         await this.sleep(60000);
       }
     }
@@ -96,19 +96,19 @@ export class ScannerScheduler {
       const { data: bookmakers } = await supabase.from('bookmakers').select('key').eq('active', true);
       const activeBookmakers = bookmakers?.map(b => b.key) || ['superbet', 'novibet'];
 
-      console.log('\n[Scanner] 🔄 Iniciando novo ciclo de busca agendado...');
+      console.log('\n[Scanner] 🔄 Starting scheduled scan cycle...');
 
       if (activeBookmakers.length < 2) {
-        console.log('[Scanner] AVISO: Menos de 2 casas de apostas ativas. Arbitragem impossível.');
+        console.log('[Scanner] WARNING: Fewer than 2 active bookmakers. Arbitrage is impossible.');
       } else if (activeSportGroups.length === 0) {
-        console.log('[Scanner] Nenhum grupo de esporte ativo. Pulando ciclo.');
+        console.log('[Scanner] No active sport groups. Skipping cycle.');
       } else {
-        console.log('[Scanner] Consultando API para descobrir ligas dos esportes selecionados...');
+        console.log('[Scanner] Querying API to discover leagues for the selected sports...');
         const leaguesToScan = await oddsApiService.getActiveLeagues(activeSportGroups);
-        console.log(`[Scanner] Mapeamento concluído: ${leaguesToScan.length} ligas encontradas.`);
+        console.log(`[Scanner] Mapping complete: ${leaguesToScan.length} leagues found.`);
 
         for (const league of leaguesToScan) {
-          console.log(`[Scanner] Buscando odds para a liga: ${league.name} (${league.slug})...`);
+          console.log(`[Scanner] Fetching odds for league: ${league.name} (${league.slug})...`);
 
           const events = await oddsApiService.getOddsForSport(
             league.sport,
@@ -131,14 +131,14 @@ export class ScannerScheduler {
           }
 
           if (foundInLeague > 0) {
-            console.log(`[Engine] 🔥 ${foundInLeague} surebets salvas em ${league.name}!`);
+            console.log(`[Engine] 🔥 ${foundInLeague} surebets saved in ${league.name}!`);
           }
 
           await this.sleep(1000);
         }
       }
     } catch (error) {
-      console.error('[Scanner] Erro no ciclo agendado:', error);
+      console.error('[Scanner] Error in scheduled cycle:', error);
       runStatus = 'error';
     } finally {
       await supabase
@@ -183,7 +183,7 @@ export class ScannerScheduler {
 
       await supabase.from('surebet_legs').insert(legsToInsert);
     } catch (error) {
-      console.error('[DB] Erro ao salvar oportunidade:', error);
+      console.error('[DB] Error saving opportunity:', error);
     }
   }
 
