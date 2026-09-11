@@ -12,6 +12,7 @@ export interface AiMatchPrediction {
 
 const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
 const FREE_PLAN_MINUTE_DELAY_MS = 6500;
+const AI_OUTPUT_TOKENS = 12000;
 
 export class AiPredictionService {
   private cache: { expiresAt: number; data: AiMatchPrediction[] } | null = null;
@@ -89,23 +90,46 @@ export class AiPredictionService {
     const system = `You are SureBet Pro's football analysis AI. Your sole job is football analysis, not betting. Never mention bookmakers, odds, stakes, ROI, arbitrage, gambling or betting advice. Analyze the supplied API-Football forecast, comparison signals, head-to-head context and the stored database history. The stored completed games are persistent evidence and MUST be considered when available. Do not invent injuries, lineups, statistics, form or results. If evidence is weak, say so and lower confidence. Return ONLY valid JSON with a top-level predictions array. Each prediction must contain id, winner, advice, analysis, keyFactors, confidence, homeWin, draw, awayWin, underOver, predictedHomeGoals, predictedAwayGoals. analysis must be 2-4 sentences explaining the reasoning. keyFactors must contain 3-6 short evidence-based points. confidence is 0-100. Probabilities are 0-100 and should sum to approximately 100.`;
     const prompt = `Analyze these upcoming football fixtures. The API-Football forecast is an input, not the final answer. Reconcile it with comparison signals, H2H and the historical games already stored in our database, then make your own reasoned prediction.\n\n${JSON.stringify(enriched, null, 2)}`;
 
-    let raw: string;
-    let usedProvider: AiProvider = aiConfig.provider;
-    let usedModel = aiConfig.model;
+    const primaryProvider = aiConfig.provider;
+    const reviewerProvider: AiProvider = primaryProvider === 'gemini' ? 'groq' : 'gemini';
+    const reviewerConfigured = reviewerProvider === 'gemini' ? geminiConfigured : groqConfigured;
+    let primaryRaw = '';
+    let primaryUsed: AiProvider = primaryProvider;
+    let finalRaw = '';
+    let finalProvider: AiProvider = primaryProvider;
+
     try {
-      raw = await generateWithAi({ provider: aiConfig.provider, system, prompt, temperature: 0.2, maxTokens: 12000 });
-      usedProvider = aiConfig.provider;
-      usedModel = aiConfig.model;
-    } catch (primaryError) {
-      const fallback: AiProvider = aiConfig.provider === 'gemini' ? 'groq' : 'gemini';
-      const configured = fallback === 'gemini' ? geminiConfigured : groqConfigured;
-      if (!configured) throw primaryError;
-      raw = await generateWithAi({ provider: fallback, system, prompt, temperature: 0.2, maxTokens: 12000 });
-      usedProvider = fallback;
-      usedModel = fallback === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b');
+      if (aiConfig.configured) {
+        primaryRaw = await generateWithAi({ provider: primaryProvider, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
+        console.log(`[AI] Primary analysis completed with ${primaryProvider}.`);
+      }
+    } catch (error) {
+      console.warn(`[AI] Primary ${primaryProvider} analysis failed:`, error instanceof Error ? error.message : error);
     }
 
-    const parsed = this.parseJson(raw);
+    if (!primaryRaw) {
+      if (!reviewerConfigured) throw new Error(`AI analysis failed and ${reviewerProvider.toUpperCase()} is not configured.`);
+      primaryRaw = await generateWithAi({ provider: reviewerProvider, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
+      primaryUsed = reviewerProvider;
+      finalProvider = reviewerProvider;
+      console.log(`[AI] Fallback analysis completed with ${reviewerProvider}.`);
+    } else if (reviewerConfigured) {
+      const reviewSystem = `${system} You are the second-pass reviewer. A first AI has already analyzed these fixtures. Independently check its work against the supplied football evidence, correct unsupported claims, fix probabilities and ensure every selected fixture has a prediction. Return the complete corrected JSON in the same required format.`;
+      const reviewPrompt = `${prompt}\n\nFIRST-PASS ANALYSIS FROM ${primaryProvider.toUpperCase()}:\n${primaryRaw}\n\nReturn the complete final corrected predictions JSON. Do not omit fixtures merely because the first pass was incomplete.`;
+      try {
+        finalRaw = await generateWithAi({ provider: reviewerProvider, system: reviewSystem, prompt: reviewPrompt, temperature: 0.15, maxTokens: AI_OUTPUT_TOKENS });
+        finalProvider = reviewerProvider;
+        console.log(`[AI] Second-pass review completed with ${reviewerProvider}; both AI models were used.`);
+      } catch (error) {
+        console.warn(`[AI] Second-pass ${reviewerProvider} review failed; retaining ${primaryUsed} analysis:`, error instanceof Error ? error.message : error);
+        finalRaw = primaryRaw;
+        finalProvider = primaryUsed;
+      }
+    } else {
+      finalRaw = primaryRaw;
+    }
+
+    const parsed = this.parseJson(finalRaw);
     const aiItems = Array.isArray(parsed)
       ? parsed
       : Array.isArray(parsed?.predictions)
@@ -113,7 +137,7 @@ export class AiPredictionService {
         : parsed?.prediction
           ? [parsed.prediction]
           : [];
-    console.log(`[AI] AI returned ${aiItems.length} predictions for ${selected.length} selected games.`);
+    console.log(`[AI] Final AI review returned ${aiItems.length} predictions for ${selected.length} selected games.`);
     const byId = new Map(selected.map((fixture: any) => [String(fixture.fixture?.id), fixture]));
     const byTeams = new Map(selected.map((fixture: any) => [
       `${String(fixture.teams?.home?.name || '').trim().toLowerCase()}|${String(fixture.teams?.away?.name || '').trim().toLowerCase()}`,
@@ -126,9 +150,7 @@ export class AiPredictionService {
       if (!fixture) {
         const home = item?.homeTeam ?? item?.home_team ?? item?.home ?? item?.teams?.home?.name;
         const away = item?.awayTeam ?? item?.away_team ?? item?.away ?? item?.teams?.away?.name;
-        if (home && away) {
-          fixture = byTeams.get(`${String(home).trim().toLowerCase()}|${String(away).trim().toLowerCase()}`);
-        }
+        if (home && away) fixture = byTeams.get(`${String(home).trim().toLowerCase()}|${String(away).trim().toLowerCase()}`);
       }
       if (!fixture) {
         console.warn(`[AI] Could not match AI prediction to a fixture. Returned id=${rawId ?? 'none'}, home=${item?.homeTeam ?? item?.home_team ?? 'unknown'}, away=${item?.awayTeam ?? item?.away_team ?? 'unknown'}`);
@@ -137,7 +159,7 @@ export class AiPredictionService {
       const prediction: AiMatchPrediction = {
         id: String(fixture.fixture?.id), league: fixture.league?.name || 'Football', homeTeam: fixture.teams?.home?.name || 'Home', awayTeam: fixture.teams?.away?.name || 'Away', startTime: fixture.fixture?.date || new Date().toISOString(),
         winner: item?.winner === fixture.teams?.home?.name || item?.winner === fixture.teams?.away?.name ? item.winner : null,
-        advice: this.stringOrNull(item?.advice), analysis: this.stringOrNull(item?.analysis), keyFactors: Array.isArray(item?.keyFactors) ? item.keyFactors.filter((value: unknown): value is string => typeof value === 'string').slice(0, 6) : [], confidence: this.toNumber(item?.confidence), homeWin: this.toNumber(item?.homeWin), draw: this.toNumber(item?.draw), awayWin: this.toNumber(item?.awayWin), underOver: this.stringOrNull(item?.underOver), predictedHomeGoals: this.toNumber(item?.predictedHomeGoals), predictedAwayGoals: this.toNumber(item?.predictedAwayGoals), aiProvider: usedProvider, aiModel: usedModel,
+        advice: this.stringOrNull(item?.advice), analysis: this.stringOrNull(item?.analysis), keyFactors: Array.isArray(item?.keyFactors) ? item.keyFactors.filter((value: unknown): value is string => typeof value === 'string').slice(0, 6) : [], confidence: this.toNumber(item?.confidence), homeWin: this.toNumber(item?.homeWin), draw: this.toNumber(item?.draw), awayWin: this.toNumber(item?.awayWin), underOver: this.stringOrNull(item?.underOver), predictedHomeGoals: this.toNumber(item?.predictedHomeGoals), predictedAwayGoals: this.toNumber(item?.predictedAwayGoals), aiProvider: finalProvider, aiModel: finalProvider === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b'),
       };
       results.push(prediction);
       const context = enriched.find((entry: any) => entry.id === prediction.id);
@@ -146,8 +168,8 @@ export class AiPredictionService {
     }
 
     console.log(`[AI] Matched and stored ${results.length}/${selected.length} AI predictions.`);
-    this.cache = { expiresAt: Date.now() + 60 * 60 * 1000, data: results };
-    console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using Gemini + Groq review.`);
+    this.cache = { expiresAt: Date.now() + 12 * 60 * 60 * 1000, data: results };
+    console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using the ${primaryUsed} primary pass and ${finalProvider} final pass.`);
     return results;
   }
 
