@@ -1,38 +1,39 @@
-# SurebetPro - Guia de Execução Local
+# SurebetPro - Local Setup Guide
 
-Como o ambiente de visualização em nuvem apresentou instabilidade de conexão (tela preta de espera), a melhor forma de ver o seu sistema funcionando perfeitamente e em alta performance é rodando-o localmente no seu computador.
+If the cloud preview environment is experiencing connection instability, the most reliable way to run and inspect the system at full performance is to run it locally on your computer.
 
-O código gerado está 100% correto, com banco de dados conectado e motor de arbitragem pronto. Siga os passos abaixo:
+The project includes the connected database integration and the ready-to-run arbitrage engine. Follow the steps below:
 
-## Pré-requisitos
-1. Instale o [Node.js](https://nodejs.org/) (versão 18 ou superior).
-2. Instale um editor de código, como o [VS Code](https://code.visualstudio.com/).
+## Prerequisites
 
-## Passo a Passo
+1. Install [Node.js](https://nodejs.org/) version 18 or higher.
+2. Install a code editor such as [VS Code](https://code.visualstudio.com/).
 
-1. **Baixe o Projeto:**
-   - No painel do Dualite, procure a opção de baixar o projeto (geralmente um ícone de download ou exportar para o GitHub/Zip).
-   - Extraia os arquivos em uma pasta no seu computador.
+## Step-by-Step
 
-2. **Abra no Terminal:**
-   - Abra a pasta do projeto extraída no VS Code.
-   - Abra o terminal integrado do VS Code (`Ctrl + \` ou `Cmd + \`).
+1. **Download the Project:**
+   - Clone or download the project repository.
+   - If you downloaded a ZIP file, extract it to a folder on your computer.
 
-3. **Instale as Dependências:**
-   Execute o comando abaixo para instalar todas as bibliotecas (React, Tailwind, Supabase, etc.):
+2. **Open the Project in a Terminal:**
+   - Open the extracted project folder in VS Code.
+   - Open the integrated VS Code terminal (`Ctrl + \`` or `Cmd + \``).
+
+3. **Install Dependencies:**
+   Run the command below to install the project libraries (React, Tailwind, Supabase, and others):
    ```bash
    yarn install
    ```
-   *(Se não tiver o yarn, pode usar `npm install`)*
+   *(If Yarn is not installed, you can use `npm install` instead.)*
 
-4. **Inicie o Sistema Completo:**
-   Para rodar o painel visual (Frontend) e o robô de busca (Backend) ao mesmo tempo, execute:
+4. **Start the Complete System:**
+   To run the visual dashboard (Frontend) and the scanning engine (Backend) together, run:
    ```bash
    yarn run dev:all
    ```
 
-5. **Acesse no Navegador:**
-   Abra o seu navegador (Chrome, Edge, Safari) e acesse:
-   👉 **http://localhost:5173**
+5. **Open the Application:**
+   Open your browser (Chrome, Edge, or Safari) and go to:
+   **http://localhost:5173**
 
-Pronto! O sistema SurebetPro abrirá perfeitamente na sua máquina, super rápido e sem depender da visualização em nuvem.
+The SurebetPro system should now be running locally without depending on the cloud preview environment.
