@@ -1,120 +1,26 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
 
-interface Profile {
-  id: string;
-  email: string;
-  plan: string;
-}
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const TOKEN_KEY = 'surebetpro_session';
 
-interface AuthContextType {
-  session: Session | null;
-  user: User | null;
-  profile: Profile | null;
-  isLoading: boolean;
-  signOut: () => Promise<void>;
-}
-
+export interface User { id: string; email: string; name: string; role: string; plan: string; }
+interface AuthContextType { user: User | null; profile: User | null; isLoading: boolean; signOut: () => Promise<void>; refreshSession: () => Promise<void>; }
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export function getAuthToken(): string | null { return localStorage.getItem(TOKEN_KEY); }
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    console.log('[AuthContext] 🔄 Inicializando verificação de sessão...');
-    
-    // Busca a sessão inicial
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        console.error('[AuthContext] ❌ Erro ao buscar sessão:', error);
-      }
-      
-      console.log('[AuthContext] ✅ Sessão inicial:', session ? 'Usuário logado' : 'Nenhum usuário');
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setIsLoading(false);
-      }
-    }).catch(err => {
-      console.error('[AuthContext] ❌ Falha crítica na Promessa do Supabase:', err);
-      setIsLoading(false);
-    });
-
-    // Escuta mudanças de estado da autenticação
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log(`[AuthContext] 🔄 Mudança de estado detectada: ${_event}`);
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      // Prevenção de deadlock: usando setTimeout para chamadas async subsequentes
-      setTimeout(async () => {
-        try {
-          if (session?.user) {
-            await fetchProfile(session.user.id);
-          } else {
-            setProfile(null);
-            setIsLoading(false);
-          }
-        } catch (err) {
-          console.error('[AuthContext] ❌ Erro no listener de auth:', err);
-          setIsLoading(false);
-        }
-      }, 0);
-    });
-
-    return () => {
-      console.log('[AuthContext] 🧹 Limpando listener de autenticação.');
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const fetchProfile = async (userId: string) => {
-    try {
-      console.log(`[AuthContext] 🔍 Buscando perfil para o usuário: ${userId}`);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error) throw error;
-      
-      console.log('[AuthContext] ✅ Perfil carregado com sucesso.');
-      setProfile(data);
-    } catch (error) {
-      console.error('[AuthContext] ❌ Erro ao buscar perfil:', error);
-    } finally {
-      setIsLoading(false);
-    }
+  const [user, setUser] = useState<User | null>(null); const [isLoading, setIsLoading] = useState(true);
+  const refreshSession = async () => {
+    const token = getAuthToken();
+    if (!token) { setUser(null); setIsLoading(false); return; }
+    try { const response = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } }); if (!response.ok) throw new Error('Session expired'); const data = await response.json(); setUser(data.user || null); }
+    catch { localStorage.removeItem(TOKEN_KEY); setUser(null); }
+    finally { setIsLoading(false); }
   };
-
-  const signOut = async () => {
-    try {
-      console.log('[AuthContext] 🚪 Realizando logout...');
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error('[AuthContext] ❌ Erro ao fazer logout:', error);
-    }
-  };
-
-  return (
-    <AuthContext.Provider value={{ session, user, profile, isLoading, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  useEffect(() => { refreshSession(); }, []);
+  const signOut = async () => { localStorage.removeItem(TOKEN_KEY); setUser(null); };
+  return <AuthContext.Provider value={{ user, profile: user, isLoading, signOut, refreshSession }}>{children}</AuthContext.Provider>;
 }
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
-  }
-  return context;
-};
+export const useAuth = () => { const context = useContext(AuthContext); if (!context) throw new Error('useAuth must be used inside AuthProvider'); return context; };
+export const AUTH_TOKEN_KEY = TOKEN_KEY;
