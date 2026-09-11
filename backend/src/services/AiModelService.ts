@@ -35,17 +35,21 @@ function getApiKey(provider: AiProvider): string {
   return process.env.GROQ_API_KEY || '';
 }
 
+function isConfigured(provider: AiProvider): boolean {
+  return Boolean(getApiKey(provider));
+}
+
 export function getAiModels(): AiModelConfig[] {
   return [
     {
       provider: 'gemini',
       model: getGeminiModel(),
-      configured: Boolean(getApiKey('gemini')),
+      configured: isConfigured('gemini'),
     },
     {
       provider: 'groq',
       model: getGroqModel(),
-      configured: Boolean(getApiKey('groq')),
+      configured: isConfigured('groq'),
     },
   ];
 }
@@ -55,23 +59,57 @@ export function getActiveAiConfig(): AiModelConfig {
   return {
     provider,
     model: provider === 'gemini' ? getGeminiModel() : getGroqModel(),
-    configured: Boolean(getApiKey(provider)),
+    configured: isConfigured(provider),
   };
 }
 
 export async function generateWithAi(options: GenerateOptions): Promise<string> {
-  const provider = options.provider || getProvider();
-  const apiKey = getApiKey(provider);
+  const requestedProvider = options.provider || getProvider();
+  const secondaryProvider: AiProvider = requestedProvider === 'gemini' ? 'groq' : 'gemini';
+  const primaryConfigured = isConfigured(requestedProvider);
+  const secondaryConfigured = isConfigured(secondaryProvider);
 
-  if (!apiKey) {
-    throw new Error(`${provider.toUpperCase()} API key is not configured`);
+  if (!primaryConfigured && !secondaryConfigured) {
+    throw new Error('Neither Gemini nor Groq API key is configured');
   }
 
-  if (provider === 'gemini') {
-    return generateWithGemini(options, apiKey);
+  let primaryRaw: string | null = null;
+  let primaryError: unknown = null;
+
+  if (primaryConfigured) {
+    try {
+      primaryRaw = requestedProvider === 'gemini'
+        ? await generateWithGemini(options, getApiKey('gemini'))
+        : await generateWithGroq(options, getApiKey('groq'));
+      console.log(`[AI] ${requestedProvider === 'gemini' ? 'Gemini' : 'Groq'} completed the primary analysis.`);
+    } catch (error) {
+      primaryError = error;
+      console.warn(`[AI] ${requestedProvider.toUpperCase()} primary analysis failed:`, error instanceof Error ? error.message : error);
+    }
   }
 
-  return generateWithGroq(options, apiKey);
+  if (!secondaryConfigured) {
+    if (primaryRaw) return primaryRaw;
+    throw primaryError instanceof Error ? primaryError : new Error(`${requestedProvider.toUpperCase()} API key is not configured`);
+  }
+
+  const reviewSystem = `${options.system || 'Analyze the supplied football data and return valid JSON.'}\n\nYou are the second AI reviewer. Another AI has already analyzed the same data. Independently check its conclusions against the supplied evidence, correct unsupported claims, and return the best final answer. Preserve the exact JSON schema requested by the original instructions. Return ONLY valid JSON.`;
+  const reviewPrompt = primaryRaw
+    ? `${options.prompt}\n\nFIRST AI ANALYSIS TO REVIEW:\n${primaryRaw}\n\nUse the first analysis as a draft, not as fact. Re-check it against the original evidence and return the corrected final JSON.`
+    : `${options.prompt}\n\nThe primary AI was unavailable. Produce the final analysis from the supplied evidence.`;
+
+  try {
+    const reviewOptions: GenerateOptions = { ...options, system: reviewSystem, prompt: reviewPrompt };
+    const finalRaw = secondaryProvider === 'gemini'
+      ? await generateWithGemini(reviewOptions, getApiKey('gemini'))
+      : await generateWithGroq(reviewOptions, getApiKey('groq'));
+    console.log(`[AI] ${secondaryProvider === 'gemini' ? 'Gemini' : 'Groq'} completed the second-pass review.`);
+    return finalRaw;
+  } catch (secondaryError) {
+    console.warn(`[AI] ${secondaryProvider.toUpperCase()} review failed:`, secondaryError instanceof Error ? secondaryError.message : secondaryError);
+    if (primaryRaw) return primaryRaw;
+    throw secondaryError;
+  }
 }
 
 async function generateWithGemini(options: GenerateOptions, apiKey: string): Promise<string> {
