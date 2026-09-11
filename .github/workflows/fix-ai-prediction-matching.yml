@@ -1,0 +1,45 @@
+name: Fix AI prediction matching
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch prediction matching
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/src/services/AiPredictionService.ts')
+          text = path.read_text()
+          old = """    const parsed = this.parseJson(raw);\n    const byId = new Map(selected.map((fixture: any) => [String(fixture.fixture?.id), fixture]));\n    const results: AiMatchPrediction[] = [];\n    for (const item of Array.isArray(parsed.predictions) ? parsed.predictions : []) {\n      const fixture = byId.get(String(item?.id));\n      if (!fixture) continue;\n"""
+          new = """    const parsed = this.parseJson(raw);\n    const aiItems = Array.isArray(parsed)\n      ? parsed\n      : Array.isArray(parsed?.predictions)\n        ? parsed.predictions\n        : parsed?.prediction\n          ? [parsed.prediction]\n          : [];\n    console.log(`[AI] AI returned ${aiItems.length} predictions for ${selected.length} selected games.`);\n    const byId = new Map(selected.map((fixture: any) => [String(fixture.fixture?.id), fixture]));\n    const byTeams = new Map(selected.map((fixture: any) => [\n      `${String(fixture.teams?.home?.name || '').trim().toLowerCase()}|${String(fixture.teams?.away?.name || '').trim().toLowerCase()}`,\n      fixture,\n    ]));\n    const results: AiMatchPrediction[] = [];\n    for (const item of aiItems) {\n      const rawId = item?.id ?? item?.fixtureId ?? item?.fixture_id ?? item?.fixture?.id;\n      let fixture = rawId != null ? byId.get(String(rawId)) : undefined;\n      if (!fixture) {\n        const home = item?.homeTeam ?? item?.home_team ?? item?.home ?? item?.teams?.home?.name;\n        const away = item?.awayTeam ?? item?.away_team ?? item?.away ?? item?.teams?.away?.name;\n        if (home && away) {\n          fixture = byTeams.get(`${String(home).trim().toLowerCase()}|${String(away).trim().toLowerCase()}`);\n        }\n      }\n      if (!fixture) {\n        console.warn(`[AI] Could not match AI prediction to a fixture. Returned id=${rawId ?? 'none'}, home=${item?.homeTeam ?? item?.home_team ?? 'unknown'}, away=${item?.awayTeam ?? item?.away_team ?? 'unknown'}`);\n        continue;\n      }\n"""
+          if old not in text:
+              raise SystemExit('Expected prediction matching block was not found')
+          text = text.replace(old, new, 1)
+          old2 = """    this.cache = { expiresAt: Date.now() + 60 * 60 * 1000, data: results };\n    console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using ${usedProvider}/${usedModel}.`);\n"""
+          new2 = """    console.log(`[AI] Matched and stored ${results.length}/${selected.length} AI predictions.`);\n    this.cache = { expiresAt: Date.now() + 60 * 60 * 1000, data: results };\n    console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using ${usedProvider}/${usedModel}.`);\n"""
+          if old2 not in text:
+              raise SystemExit('Expected completion block was not found')
+          text = text.replace(old2, new2, 1)
+          path.write_text(text)
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/services/AiPredictionService.ts
+          git rm .github/workflows/fix-ai-prediction-matching.yml
+          git commit -m "fix: match AI predictions to fetched fixtures"
+          git push origin HEAD:main
