@@ -27,21 +27,22 @@ export class AiPredictionService {
 
   private async sleep(ms: number): Promise<void> { await new Promise(resolve => setTimeout(resolve, ms)); }
 
-  public async runAutomaticAnalysis(limit = 8): Promise<AiMatchPrediction[]> {
+  public async runAutomaticAnalysis(limit = 40): Promise<AiMatchPrediction[]> {
     const aiConfig = getActiveAiConfig();
-    if (!aiConfig.configured) throw new Error(`AI prediction model is not configured: ${aiConfig.provider}`);
+    const geminiConfigured = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY);
+    const groqConfigured = Boolean(process.env.GROQ_API_KEY);
+    if (!geminiConfigured && !groqConfigured) throw new Error('Neither Gemini nor Groq API key is configured.');
     if (!(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY)) throw new Error('API-Football key is not configured.');
 
     const today = new Date();
-    const dates = [this.formatDate(today), this.formatDate(new Date(today.getTime() + 86400000))];
-    let fixtures: any[] = [];
-    for (const date of dates) {
-      console.log(`[AI] Fetching upcoming football games for ${date}...`);
-      const data = await this.requestFootball('/fixtures', { date });
-      fixtures = Array.isArray(data.response) ? data.response.filter((fixture: any) => ['NS', 'TBD'].includes(String(fixture.fixture?.status?.short))) : [];
-      console.log(`[AI] ${date}: fetched ${fixtures.length} upcoming games.`);
-      if (fixtures.length) break;
-    }
+    const from = this.formatDate(today);
+    const to = this.formatDate(new Date(today.getTime() + 6 * 86400000));
+    console.log(`[AI] Fetching upcoming football games from ${from} through ${to}...`);
+    const data = await this.requestFootball('/fixtures', { from, to });
+    const fixtures = Array.isArray(data.response)
+      ? data.response.filter((fixture: any) => ['NS', 'TBD'].includes(String(fixture.fixture?.status?.short)))
+      : [];
+    console.log(`[AI] Fetched ${fixtures.length} upcoming games in the analysis window.`);
 
     const selected = fixtures.slice(0, limit);
     if (!selected.length) {
@@ -92,12 +93,14 @@ export class AiPredictionService {
     let usedProvider: AiProvider = aiConfig.provider;
     let usedModel = aiConfig.model;
     try {
-      raw = await generateWithAi({ provider: aiConfig.provider, system, prompt, temperature: 0.2, maxTokens: 5000 });
+      raw = await generateWithAi({ provider: aiConfig.provider, system, prompt, temperature: 0.2, maxTokens: 12000 });
+      usedProvider = aiConfig.provider;
+      usedModel = aiConfig.model;
     } catch (primaryError) {
       const fallback: AiProvider = aiConfig.provider === 'gemini' ? 'groq' : 'gemini';
-      const configured = fallback === 'gemini' ? Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY) : Boolean(process.env.GROQ_API_KEY);
+      const configured = fallback === 'gemini' ? geminiConfigured : groqConfigured;
       if (!configured) throw primaryError;
-      raw = await generateWithAi({ provider: fallback, system, prompt, temperature: 0.2, maxTokens: 5000 });
+      raw = await generateWithAi({ provider: fallback, system, prompt, temperature: 0.2, maxTokens: 12000 });
       usedProvider = fallback;
       usedModel = fallback === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b');
     }
@@ -144,13 +147,13 @@ export class AiPredictionService {
 
     console.log(`[AI] Matched and stored ${results.length}/${selected.length} AI predictions.`);
     this.cache = { expiresAt: Date.now() + 60 * 60 * 1000, data: results };
-    console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using ${usedProvider}/${usedModel}.`);
+    console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using Gemini + Groq review.`);
     return results;
   }
 
-  public async getPredictions(limit = 8): Promise<AiMatchPrediction[]> {
+  public async getPredictions(limit = 40): Promise<AiMatchPrediction[]> {
     if (this.cache && this.cache.expiresAt > Date.now()) return this.cache.data.slice(0, limit);
-    const rows = await sql`SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at, p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.home_win, p.draw, p.away_win, p.under_over, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model FROM football_fixtures f JOIN football_ai_predictions p ON p.fixture_id = f.id WHERE f.kickoff_at >= NOW() - INTERVAL '2 hours' AND f.kickoff_at <= NOW() + INTERVAL '48 hours' ORDER BY f.kickoff_at ASC LIMIT ${limit}`;
+    const rows = await sql`SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at, p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.home_win, p.draw, p.away_win, p.under_over, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model FROM football_fixtures f JOIN football_ai_predictions p ON p.fixture_id = f.id WHERE f.kickoff_at >= NOW() - INTERVAL '2 hours' AND f.kickoff_at <= NOW() + INTERVAL '7 days' ORDER BY f.kickoff_at ASC LIMIT ${limit}`;
     const data = rows.map((row: any) => ({ id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team, startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: this.toNumber(row.confidence), homeWin: this.toNumber(row.home_win), draw: this.toNumber(row.draw), awayWin: this.toNumber(row.away_win), underOver: row.under_over || null, predictedHomeGoals: this.toNumber(row.predicted_home_goals), predictedAwayGoals: this.toNumber(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null }));
     if (data.length) this.cache = { expiresAt: Date.now() + 30 * 60 * 1000, data };
     return data;
