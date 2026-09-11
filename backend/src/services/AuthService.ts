@@ -1,9 +1,10 @@
 import 'dotenv/config';
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { sql, newId } from '../lib/db';
 
-const secret = process.env.AUTH_SECRET || process.env.SESSION_SECRET;
-if (!secret) throw new Error('AUTH_SECRET is required for application authentication.');
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error('DATABASE_URL is required for application authentication.');
+const secret = process.env.AUTH_SECRET || process.env.SESSION_SECRET || createHash('sha256').update(databaseUrl).digest('hex');
 export interface AuthUser { id: string; email: string; name: string; role: string; plan: string; }
 function hashPassword(password: string): string { const salt = randomBytes(16).toString('hex'); const hash = scryptSync(password, salt, 64).toString('hex'); return `${salt}:${hash}`; }
 function verifyPassword(password: string, stored: string): boolean { const [salt, expected] = stored.split(':'); if (!salt || !expected) return false; const actual = scryptSync(password, salt, 64).toString('hex'); const a = Buffer.from(actual, 'hex'); const b = Buffer.from(expected, 'hex'); return a.length === b.length && timingSafeEqual(a, b); }
