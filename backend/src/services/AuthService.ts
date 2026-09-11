@@ -1,0 +1,64 @@
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { sql, newId } from '../lib/db';
+
+const secret = process.env.AUTH_SECRET || process.env.SESSION_SECRET;
+if (!secret) throw new Error('AUTH_SECRET is required for application authentication.');
+
+export interface AuthUser { id: string; email: string; name: string; role: string; plan: string; }
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  const [salt, expected] = stored.split(':');
+  if (!salt || !expected) return false;
+  const actual = scryptSync(password, salt, 64).toString('hex');
+  return timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex'));
+}
+
+function encode(value: string): string { return Buffer.from(value).toString('base64url'); }
+function decode(value: string): string { return Buffer.from(value, 'base64url').toString('utf8'); }
+
+export function createSession(user: AuthUser): string {
+  const payload = encode(JSON.stringify({ sub: user.id, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
+  const signature = createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+export function verifySession(token: string): string | null {
+  try {
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature) return null;
+    const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+    if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+    const data = JSON.parse(decode(payload)) as { sub: string; exp: number };
+    return data.exp > Date.now() ? data.sub : null;
+  } catch { return null; }
+}
+
+export async function register(email: string, password: string, name: string): Promise<AuthUser> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || password.length < 8 || !name.trim()) throw new Error('Name, email and a password of at least 8 characters are required.');
+  const existing = await sql`SELECT id FROM users WHERE email = ${normalizedEmail} LIMIT 1`;
+  if (existing.length) throw new Error('An account with that email already exists.');
+  const id = newId();
+  await sql`INSERT INTO users (id, email, password_hash, name, role) VALUES (${id}, ${normalizedEmail}, ${hashPassword(password)}, ${name.trim()}, 'USER')`;
+  return { id, email: normalizedEmail, name: name.trim(), role: 'USER', plan: 'FREE' };
+}
+
+export async function login(email: string, password: string): Promise<AuthUser> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const rows = await sql`SELECT id, email, password_hash, name, role FROM users WHERE email = ${normalizedEmail} LIMIT 1`;
+  const user = rows[0];
+  if (!user || !verifyPassword(password, user.password_hash)) throw new Error('Invalid email or password.');
+  return { id: String(user.id), email: String(user.email), name: String(user.name), role: String(user.role), plan: 'FREE' };
+}
+
+export async function getUser(userId: string): Promise<AuthUser | null> {
+  const rows = await sql`SELECT id, email, name, role FROM users WHERE id = ${userId} LIMIT 1`;
+  if (!rows[0]) return null;
+  return { id: String(rows[0].id), email: String(rows[0].email), name: String(rows[0].name), role: String(rows[0].role), plan: 'FREE' };
+}
