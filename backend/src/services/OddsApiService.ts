@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { sql } from '../lib/db';
+import { generateWithAi, getActiveAiConfig, type AiProvider } from './AiModelService';
 
 interface ApiLeague { name: string; slug: string; sport: string; }
 interface NormalizedEvent {
@@ -17,6 +18,7 @@ export interface MatchPrediction {
   startTime: string; winner: string | null; advice: string | null;
   homeWin: number | null; draw: number | null; awayWin: number | null;
   underOver: string | null; predictedHomeGoals: number | null; predictedAwayGoals: number | null;
+  aiProvider: AiProvider | null; aiModel: string | null;
 }
 
 const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
@@ -118,35 +120,107 @@ export class OddsApiService {
     } catch (error: any) { console.error('[OddsApiService] Error fetching live football matches:', error.message); return []; }
   }
 
+  /**
+   * Generate predictions with our configured AI model, using live fixture data as the
+   * analysis input. API-Football supplies the facts; Gemini/Groq supplies the prediction.
+   */
   public async getMatchPredictions(limit = 8): Promise<MatchPrediction[]> {
     if (this.predictionCache && this.predictionCache.expiresAt > Date.now()) return this.predictionCache.data;
     const config = await this.getApiConfig();
     if (!config.apiFootball) return [];
+
+    const aiConfig = getActiveAiConfig();
+    if (!aiConfig.configured) throw new Error(`AI prediction model is not configured: ${aiConfig.provider}`);
+
     try {
       const today = new Date();
       const dates = [this.formatDate(today), this.formatDate(new Date(today.getTime() + 86400000))];
       let fixtures: any[] = [];
       for (const date of dates) {
         const data = await this.requestFootball('/fixtures', { date });
-        fixtures = Array.isArray(data.results) ? data.results.filter((fixture: any) => fixture.fixture?.status?.short === 'NS' || fixture.fixture?.status?.short === 'TBD') : [];
+        fixtures = Array.isArray(data.results)
+          ? data.results.filter((fixture: any) => fixture.fixture?.status?.short === 'NS' || fixture.fixture?.status?.short === 'TBD')
+          : [];
         if (fixtures.length) break;
       }
-      const predictions: MatchPrediction[] = [];
-      for (const fixture of fixtures.slice(0, limit)) {
-        const fixtureId = fixture.fixture?.id;
-        if (!fixtureId) continue;
-        try {
-          const data = await this.requestFootball('/predictions', { fixture: fixtureId });
-          const prediction = data.results?.[0];
-          const percent = prediction?.predictions?.percent || {};
-          const winner = prediction?.predictions?.winner?.name || null;
-          const goals = prediction?.predictions?.goals || {};
-          predictions.push({ id: String(fixtureId), league: fixture.league?.name || 'Football', homeTeam: fixture.teams?.home?.name || 'Home', awayTeam: fixture.teams?.away?.name || 'Away', startTime: fixture.fixture?.date || new Date().toISOString(), winner, advice: prediction?.predictions?.advice || null, homeWin: this.toPercent(percent.home), draw: this.toPercent(percent.draw), awayWin: this.toPercent(percent.away), underOver: prediction?.predictions?.under_over || null, predictedHomeGoals: this.toNumber(goals.home), predictedAwayGoals: this.toNumber(goals.away) });
-        } catch (error: any) { console.warn(`[OddsApiService] Prediction unavailable for fixture ${fixtureId}:`, error.message); }
+
+      const selected = fixtures.slice(0, limit).map((fixture: any) => ({
+        id: String(fixture.fixture?.id || ''),
+        league: fixture.league?.name || 'Football',
+        country: fixture.league?.country || '',
+        homeTeam: fixture.teams?.home?.name || 'Home',
+        awayTeam: fixture.teams?.away?.name || 'Away',
+        startTime: fixture.fixture?.date || null,
+      })).filter((fixture: any) => fixture.id);
+
+      if (!selected.length) {
+        this.predictionCache = { expiresAt: Date.now() + 15 * 60 * 1000, data: [] };
+        return [];
       }
+
+      const system = `You are the football prediction analyst for SureBet Pro. Analyze the supplied real fixture information and produce disciplined probability estimates. Do not claim to have data that is not supplied. Your output MUST be valid JSON with a top-level "predictions" array. For every fixture return: id, winner, advice, homeWin, draw, awayWin, underOver, predictedHomeGoals, predictedAwayGoals. Probabilities must be numbers from 0 to 100 and should sum to approximately 100. winner must be exactly the supplied home or away team name, or null when genuinely too close to call. Keep advice concise. This is analysis, not a guarantee of outcome.`;
+      const prompt = `Generate predictions for these upcoming football fixtures using your own analytical reasoning. Consider league context, home advantage, fixture timing and any football knowledge you can reliably use, but never invent specific statistics, injuries, lineups or recent results.\n\nFixtures:\n${JSON.stringify(selected, null, 2)}`;
+
+      let raw: string;
+      let usedProvider: AiProvider = aiConfig.provider;
+      let usedModel = aiConfig.model;
+      try {
+        raw = await generateWithAi({ provider: aiConfig.provider, system, prompt, temperature: 0.15, maxTokens: 3000 });
+      } catch (primaryError) {
+        const fallback: AiProvider = aiConfig.provider === 'gemini' ? 'groq' : 'gemini';
+        const fallbackConfigured = fallback === 'gemini'
+          ? Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY)
+          : Boolean(process.env.GROQ_API_KEY);
+        if (!fallbackConfigured) throw primaryError;
+        console.warn(`[OddsApiService] ${aiConfig.provider} prediction failed; using ${fallback} fallback.`);
+        raw = await generateWithAi({ provider: fallback, system, prompt, temperature: 0.15, maxTokens: 3000 });
+        usedProvider = fallback;
+        usedModel = fallback === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b');
+      }
+
+      const parsed = this.parseAiJson(raw);
+      const byId = new Map(selected.map((fixture: any) => [fixture.id, fixture]));
+      const predictions: MatchPrediction[] = [];
+      for (const item of Array.isArray(parsed.predictions) ? parsed.predictions : []) {
+        const fixture = byId.get(String(item?.id));
+        if (!fixture) continue;
+        const homeWin = this.toPercent(item?.homeWin);
+        const draw = this.toPercent(item?.draw);
+        const awayWin = this.toPercent(item?.awayWin);
+        predictions.push({
+          id: fixture.id,
+          league: fixture.league,
+          homeTeam: fixture.homeTeam,
+          awayTeam: fixture.awayTeam,
+          startTime: fixture.startTime,
+          winner: item?.winner === fixture.homeTeam || item?.winner === fixture.awayTeam ? item.winner : null,
+          advice: typeof item?.advice === 'string' ? item.advice : null,
+          homeWin, draw, awayWin,
+          underOver: typeof item?.underOver === 'string' ? item.underOver : null,
+          predictedHomeGoals: this.toNumber(item?.predictedHomeGoals),
+          predictedAwayGoals: this.toNumber(item?.predictedAwayGoals),
+          aiProvider: usedProvider,
+          aiModel: usedModel,
+        });
+      }
+
       this.predictionCache = { expiresAt: Date.now() + 60 * 60 * 1000, data: predictions };
+      console.log(`[AI] Generated ${predictions.length} football predictions with ${usedProvider}/${usedModel}.`);
       return predictions;
-    } catch (error: any) { console.error('[OddsApiService] Error fetching match predictions:', error.message); return []; }
+    } catch (error: any) {
+      console.error('[OddsApiService] AI prediction generation failed:', error.message);
+      throw error;
+    }
+  }
+
+  private parseAiJson(raw: string): any {
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    try { return JSON.parse(cleaned); } catch {
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+      throw new Error('AI returned invalid prediction JSON');
+    }
   }
 
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
@@ -207,13 +281,13 @@ export class OddsApiService {
         if (odds.home !== undefined) addOutcome(event.home, odds.home);
         if (odds.draw !== undefined) addOutcome('Draw', odds.draw);
         if (odds.away !== undefined) addOutcome(event.away, odds.away);
-        if (odds.over !== undefined) addOutcome(`Over ${odds.max ?? ''}`.trim(), odds.over);
-        if (odds.under !== undefined) addOutcome(`Under ${odds.max ?? ''}`.trim(), odds.under);
-        if (outcomes.length >= 2) normalizedMarkets.push({ key: market.name === 'ML' ? 'h2h' : market.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'), outcomes });
+        if (odds.over !== undefined) addOutcome('Over', odds.over);
+        if (odds.under !== undefined) addOutcome('Under', odds.under);
+        if (outcomes.length > 0) normalizedMarkets.push({ key: market.name, outcomes });
       }
       return { key: bookmakerKey, markets: normalizedMarkets };
     }).filter(bookmaker => bookmaker.markets.length > 0);
-    return { id: String(event.id), sport_key: event.sport?.slug || 'unknown', sport_title: event.sport?.name || 'Unknown', league_title: event.league?.name || 'Unknown League', home_team: event.home, away_team: event.away, commence_time: event.date, bookmakers };
+    return { id: String(event.id), sport_key: event.sport?.slug || 'soccer', sport_title: event.sport?.name || 'Football', league_title: event.league?.name || 'Unknown League', home_team: event.home, away_team: event.away, commence_time: event.date, bookmakers };
   }
 }
 
