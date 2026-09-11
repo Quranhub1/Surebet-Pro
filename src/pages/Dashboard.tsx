@@ -9,6 +9,9 @@ interface MatchPrediction {
   startTime: string;
   winner: string | null;
   advice: string | null;
+  analysis: string | null;
+  keyFactors: string[];
+  confidence: number | null;
   homeWin: number | null;
   draw: number | null;
   awayWin: number | null;
@@ -67,7 +70,7 @@ export function Dashboard() {
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">AI Football Analysis</h1>
             </div>
             <p className="text-[#8b8d93] text-sm md:text-base max-w-2xl">
-              AI analyzes upcoming football fixtures and presents the predicted outcome, probabilities, expected score, and the reasoning behind each prediction.
+              AI analyzes upcoming football fixtures and presents the predicted outcome, probabilities, expected score, confidence, and the reasoning behind each prediction.
             </p>
           </div>
           <button
@@ -140,10 +143,20 @@ export function Dashboard() {
                   </div>
 
                   <div className="rounded-xl border border-[#39FF14]/20 bg-[#39FF14]/5 p-4 mb-4">
-                    <p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">AI prediction</p>
-                    <p className="text-xl font-extrabold text-[#39FF14]">{prediction.winner || 'Too close to call'}</p>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">AI prediction</p>
+                        <p className="text-xl font-extrabold text-[#39FF14]">{prediction.winner || 'Too close to call'}</p>
+                      </div>
+                      {prediction.confidence !== null && (
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">Confidence</p>
+                          <p className="text-lg font-extrabold text-white">{prediction.confidence.toFixed(0)}%</p>
+                        </div>
+                      )}
+                    </div>
                     {(prediction.predictedHomeGoals !== null && prediction.predictedAwayGoals !== null) && (
-                      <p className="text-xs text-[#b7b9bf] mt-1">
+                      <p className="text-xs text-[#b7b9bf] mt-2">
                         Expected score: <span className="text-white font-semibold">{prediction.predictedHomeGoals} - {prediction.predictedAwayGoals}</span>
                       </p>
                     )}
@@ -153,11 +166,27 @@ export function Dashboard() {
                   <div className="rounded-xl border border-[#2c2e33] bg-[#0d0d0f] p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <BrainCircuit className="w-4 h-4 text-[#39FF14]" />
-                      <p className="text-xs font-bold uppercase tracking-wide">Why the AI chose this</p>
+                      <p className="text-xs font-bold uppercase tracking-wide">AI reasoning</p>
                     </div>
                     <p className="text-sm leading-6 text-[#c4c6cb]">
-                      {prediction.advice || 'The AI did not return a detailed explanation for this fixture.'}
+                      {prediction.analysis || prediction.advice || 'The AI did not return a detailed explanation for this fixture.'}
                     </p>
+                    {prediction.advice && prediction.analysis && prediction.advice !== prediction.analysis && (
+                      <p className="text-xs text-[#8b8d93] mt-3 italic">{prediction.advice}</p>
+                    )}
+                    {prediction.keyFactors.length > 0 && (
+                      <div className="mt-4">
+                        <p className="text-[10px] uppercase tracking-wider text-[#6f727a] mb-2">Key factors</p>
+                        <ul className="space-y-1.5">
+                          {prediction.keyFactors.map((factor, index) => (
+                            <li key={`${prediction.id}-factor-${index}`} className="text-xs text-[#b7b9bf] flex gap-2">
+                              <span className="text-[#39FF14]">•</span>
+                              <span>{factor}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-[#2c2e33] flex items-center justify-between gap-3 text-[10px] text-[#6f727a]">
