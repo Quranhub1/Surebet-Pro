@@ -1,16 +1,17 @@
 import express from 'express';
 import cors from 'cors';
+import { generateWithAi, getActiveAiConfig, getAiModels, type AiProvider } from './services/AiModelService';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 export async function startServer(): Promise<void> {
-  const PORT = process.env.PORT || 3001;
+  const PORT = Number(process.env.PORT || 3001);
   
   await new Promise<void>((resolve) => {
-    app.listen(PORT, () => {
-      console.log(`[API] Server running on http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`[API] Server running on port ${PORT}`);
       resolve();
     });
   });
@@ -35,6 +36,51 @@ app.get('/api/health', async (_req, res) => {
       version: '2.1.0',
       database: false,
     });
+  }
+});
+
+app.get('/api/ai/models', (_req, res) => {
+  res.json({
+    active: getActiveAiConfig(),
+    models: getAiModels(),
+  });
+});
+
+app.post('/api/ai/generate', async (req, res) => {
+  try {
+    const body = req.body as {
+      provider?: AiProvider;
+      prompt?: string;
+      system?: string;
+      temperature?: number;
+      maxTokens?: number;
+    };
+
+    if (!body.prompt || typeof body.prompt !== 'string') {
+      return res.status(400).json({ error: 'prompt is required' });
+    }
+
+    if (body.provider && body.provider !== 'gemini' && body.provider !== 'groq') {
+      return res.status(400).json({ error: 'provider must be gemini or groq' });
+    }
+
+    const content = await generateWithAi({
+      provider: body.provider,
+      prompt: body.prompt,
+      system: body.system,
+      temperature: body.temperature,
+      maxTokens: body.maxTokens,
+    });
+
+    res.json({
+      ok: true,
+      provider: body.provider || getActiveAiConfig().provider,
+      content,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI generation failed';
+    console.error('[AI] Generation failed:', message);
+    res.status(502).json({ error: message });
   }
 });
 
