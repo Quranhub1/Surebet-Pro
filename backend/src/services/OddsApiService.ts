@@ -20,24 +20,48 @@ export interface LiveFootballMatch {
   startTime: string; minute: number | null;
 }
 
+const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
+
 export class OddsApiService {
   private async getApiConfig() {
     try {
       const rows = await sql`SELECT odds_api_key, api_base_url, api_endpoint_odds FROM system_settings WHERE id = 1`;
       const data = rows[0];
       return {
-        key: data?.odds_api_key || process.env.ODDS_API_KEY || '',
-        baseUrl: (data?.api_base_url || 'https://api.odds-api.io/v3').replace(/\/$/, ''),
+        key: data?.odds_api_key || process.env.API_FOOTBALL_KEY || process.env.ODDS_API_KEY || '',
+        baseUrl: process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY
+          ? API_FOOTBALL_BASE_URL
+          : (data?.api_base_url || process.env.ODDS_API_BASE_URL || 'https://api.odds-api.io/v3').replace(/\/$/, ''),
         endpoint: data?.api_endpoint_odds || '/odds',
+        apiFootball: Boolean(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY),
       };
     } catch (error) {
       console.error('[OddsApiService] Error loading Neon API configuration:', error);
-      return { key: process.env.ODDS_API_KEY || '', baseUrl: 'https://api.odds-api.io/v3', endpoint: '/odds' };
+      return {
+        key: process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY || process.env.ODDS_API_KEY || '',
+        baseUrl: API_FOOTBALL_BASE_URL,
+        endpoint: '/odds',
+        apiFootball: Boolean(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY),
+      };
     }
+  }
+
+  private async requestFootball(path: string, params: Record<string, string | number>) {
+    const key = process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY;
+    if (!key) throw new Error('No API-Football key configured.');
+    const response = await axios.get(`${API_FOOTBALL_BASE_URL}${path}`, {
+      params,
+      headers: { 'x-apisports-key': key, Accept: 'application/json' },
+    });
+    if (response.data?.errors && Object.keys(response.data.errors).length > 0) {
+      throw new Error(Object.values(response.data.errors).join('; '));
+    }
+    return response.data;
   }
 
   private async request(path: string, params: Record<string, string | number>) {
     const config = await this.getApiConfig();
+    if (config.apiFootball) return this.requestFootball(path, params);
     if (!config.key) throw new Error('No Odds API key configured.');
     const response = await axios.get(`${config.baseUrl}${path}`, {
       params: { ...params, apiKey: config.key },
@@ -49,6 +73,15 @@ export class OddsApiService {
   public async getActiveLeagues(activeSportGroups: string[]): Promise<ApiLeague[]> {
     if (activeSportGroups.length === 0) return [];
     try {
+      const config = await this.getApiConfig();
+      if (config.apiFootball) {
+        const data = await this.requestFootball('/leagues', { season: new Date().getUTCFullYear() });
+        return (data.results || []).map((item: any) => ({
+          name: item.league?.name || 'Unknown League',
+          slug: String(item.league?.id || item.league?.name || '').toLowerCase(),
+          sport: String(item.league?.type || 'football').toLowerCase(),
+        }));
+      }
       const sports = await this.request('/sports', {});
       const wanted = new Set(activeSportGroups.map(value => value.toLowerCase()));
       const matchedSports = (Array.isArray(sports) ? sports : []).filter((sport: any) => wanted.has(String(sport.slug || sport.name).toLowerCase()));
@@ -67,6 +100,12 @@ export class OddsApiService {
 
   public async getOddsForSport(sportKey: string, leagueKey: string, activeMarkets: string[], activeBookmakers: string[]): Promise<NormalizedEvent[]> {
     try {
+      const config = await this.getApiConfig();
+      if (config.apiFootball) {
+        const fixtureData = await this.requestFootball('/fixtures', { league: Number(leagueKey), season: new Date().getUTCFullYear() });
+        const fixtures = Array.isArray(fixtureData.results) ? fixtureData.results : [];
+        return this.getFootballOddsForFixtures(fixtures, activeMarkets);
+      }
       const events = await this.request('/events', { sport: sportKey, league: leagueKey, status: 'pending', limit: 100 });
       return this.getOddsForEvents(Array.isArray(events) ? events : [], activeMarkets, activeBookmakers);
     } catch (error: any) {
@@ -77,6 +116,12 @@ export class OddsApiService {
 
   public async getLiveOdds(activeSportGroups: string[], activeMarkets: string[], activeBookmakers: string[]): Promise<NormalizedEvent[]> {
     try {
+      const config = await this.getApiConfig();
+      if (config.apiFootball) {
+        const data = await this.requestFootball('/fixtures', { live: 'all' });
+        const fixtures = Array.isArray(data.results) ? data.results : [];
+        return this.getFootballOddsForFixtures(fixtures, activeMarkets);
+      }
       const liveEvents = await this.request('/events/live', {});
       const wantedSports = new Set(activeSportGroups.map(value => value.toLowerCase()));
       const filteredEvents = (Array.isArray(liveEvents) ? liveEvents : []).filter((event: any) => {
@@ -92,6 +137,18 @@ export class OddsApiService {
 
   public async getLiveFootballMatches(): Promise<LiveFootballMatch[]> {
     try {
+      const config = await this.getApiConfig();
+      if (config.apiFootball) {
+        const data = await this.requestFootball('/fixtures', { live: 'all' });
+        return (Array.isArray(data.results) ? data.results : []).map((fixture: any) => ({
+          id: String(fixture.fixture?.id), league: fixture.league?.name || 'Football',
+          homeTeam: fixture.teams?.home?.name || 'Home', awayTeam: fixture.teams?.away?.name || 'Away',
+          homeScore: this.toScore(fixture.goals?.home), awayScore: this.toScore(fixture.goals?.away),
+          status: String(fixture.fixture?.status?.short || fixture.fixture?.status?.long || 'LIVE'),
+          startTime: fixture.fixture?.date || new Date().toISOString(),
+          minute: this.toScore(fixture.fixture?.status?.elapsed),
+        }));
+      }
       const liveEvents = await this.request('/events/live', {});
       const footballEvents = (Array.isArray(liveEvents) ? liveEvents : []).filter((event: any) => {
         const sport = `${event.sport?.slug || ''} ${event.sport?.name || ''}`.toLowerCase();
@@ -108,6 +165,45 @@ export class OddsApiService {
       console.error('[OddsApiService] Error fetching live football matches:', error.message);
       return [];
     }
+  }
+
+  private async getFootballOddsForFixtures(fixtures: any[], activeMarkets: string[]): Promise<NormalizedEvent[]> {
+    const results: NormalizedEvent[] = [];
+    for (const fixture of fixtures.slice(0, 20)) {
+      try {
+        const data = await this.requestFootball('/odds', { fixture: fixture.fixture?.id });
+        const bookmakers = this.normalizeFootballOdds(data.results?.[0], fixture, activeMarkets);
+        if (bookmakers.length >= 2) {
+          results.push({
+            id: String(fixture.fixture?.id), sport_key: 'soccer', sport_title: 'Football',
+            league_title: fixture.league?.name || 'Unknown League', home_team: fixture.teams?.home?.name,
+            away_team: fixture.teams?.away?.name, commence_time: fixture.fixture?.date, bookmakers,
+          });
+        }
+      } catch (error: any) {
+        console.warn(`[OddsApiService] Could not load odds for fixture ${fixture.fixture?.id}:`, error.message);
+      }
+    }
+    return results;
+  }
+
+  private normalizeFootballOdds(oddsResult: any, fixture: any, activeMarkets: string[]) {
+    const wanted = new Set(activeMarkets.map(key => key.toLowerCase()));
+    const bookmakers: { key: string; markets: { key: string; outcomes: { name: string; price: number }[] }[] }[] = [];
+    for (const bookmaker of oddsResult?.bookmakers || []) {
+      const markets: { key: string; outcomes: { name: string; price: number }[] }[] = [];
+      for (const bet of bookmaker.bets || []) {
+        const name = String(bet.name || '').toLowerCase();
+        const key = name.includes('match winner') || name === '1x2' ? 'h2h' : name.replace(/[^a-z0-9]+/g, '_');
+        if (wanted.size > 0 && !wanted.has(key) && !(key === 'h2h' && wanted.has('ml'))) continue;
+        const outcomes = (bet.values || []).map((value: any) => ({
+          name: String(value.value), price: Number(value.odd),
+        })).filter((outcome: any) => Number.isFinite(outcome.price) && outcome.price > 1);
+        if (outcomes.length >= 2) markets.push({ key, outcomes });
+      }
+      if (markets.length > 0) bookmakers.push({ key: String(bookmaker.id || bookmaker.name).toLowerCase().replace(/[^a-z0-9]+/g, '_'), markets });
+    }
+    return bookmakers;
   }
 
   private toScore(value: unknown): number | null {
