@@ -6,13 +6,13 @@ import { startServer } from './server';
 dotenv.config();
 
 console.log('=========================================');
-console.log('🚀 Iniciando SurebetPro Backend Engine');
+console.log('🚀 Starting SurebetPro Backend Engine');
 console.log('=========================================');
 
 startServer().catch(err => {
-  console.error('Falha crítica ao iniciar o Servidor API:', err);
+  console.error('Critical error while starting the API server:', err);
 });
 
 scannerScheduler.start().catch(err => {
-  console.error('Falha crítica ao iniciar o Scanner:', err);
+  console.error('Critical error while starting the scanner:', err);
 });
