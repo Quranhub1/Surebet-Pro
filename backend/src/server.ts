@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { generateWithAi, getActiveAiConfig, getAiModels, type AiProvider } from './services/AiModelService';
+import { oddsApiService } from './services/OddsApiService';
 import { supabase } from './lib/supabase';
 
 const app = express();
@@ -36,6 +37,22 @@ app.get('/api/health', async (_req, res) => {
       version: '2.1.0',
       database: false,
     });
+  }
+});
+
+app.get('/api/football/live', async (_req, res) => {
+  try {
+    const matches = await oddsApiService.getLiveFootballMatches();
+    res.json({
+      ok: true,
+      updatedAt: new Date().toISOString(),
+      count: matches.length,
+      matches,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Live football feed failed';
+    console.error('[Football] Live feed failed:', message);
+    res.status(502).json({ ok: false, error: message, matches: [] });
   }
 });
 
