@@ -1,39 +1,50 @@
 # SurebetPro - Local Setup Guide
 
-If the cloud preview environment is experiencing connection instability, the most reliable way to run and inspect the system at full performance is to run it locally on your computer.
-
-The project includes the connected database integration and the ready-to-run arbitrage engine. Follow the steps below:
+SurebetPro is an automated sports-betting arbitrage platform. The application uses **Neon PostgreSQL as its only database**, with the backend acting as the secure gateway between the website, the database, the odds provider, and the arbitrage engine.
 
 ## Prerequisites
 
-1. Install [Node.js](https://nodejs.org/) version 18 or higher.
-2. Install a code editor such as [VS Code](https://code.visualstudio.com/).
+1. Node.js 22 or higher.
+2. A Neon PostgreSQL database and its `DATABASE_URL`.
+3. An `AUTH_SECRET` for application sessions.
+4. An Odds API key stored as an environment variable or in the Neon `system_settings` record.
 
-## Step-by-Step
+## Environment
 
-1. **Download the Project:**
-   - Clone or download the project repository.
-   - If you downloaded a ZIP file, extract it to a folder on your computer.
+Set these variables on the server:
 
-2. **Open the Project in a Terminal:**
-   - Open the extracted project folder in VS Code.
-   - Open the integrated VS Code terminal (`Ctrl + \`` or `Cmd + \``).
+```bash
+DATABASE_URL=your-neon-connection-string
+AUTH_SECRET=your-long-random-session-secret
+ODDS_API_KEY=your-odds-api-key
+```
 
-3. **Install Dependencies:**
-   Run the command below to install the project libraries (React, Tailwind, Supabase, and others):
-   ```bash
-   yarn install
-   ```
-   *(If Yarn is not installed, you can use `npm install` instead.)*
+Do not commit real credentials to Git.
 
-4. **Start the Complete System:**
-   To run the visual dashboard (Frontend) and the scanning engine (Backend) together, run:
-   ```bash
-   yarn run dev:all
-   ```
+## Install and run
 
-5. **Open the Application:**
-   Open your browser (Chrome, Edge, or Safari) and go to:
-   **http://localhost:5173**
+```bash
+npm install
+npm run dev:all
+```
 
-The SurebetPro system should now be running locally without depending on the cloud preview environment.
+The frontend runs on `http://localhost:5173` and the backend runs on port `3001` unless `PORT` is configured.
+
+## Database
+
+The backend initializes the required Neon tables on startup. Database health is exposed at `/api/health`, and the response identifies the provider as Neon PostgreSQL.
+
+The backend stores scanner settings, users, alerts, events, and surebet opportunities in Neon. The browser never connects directly to PostgreSQL.
+
+## Automation
+
+- Upcoming matches and arbitrage opportunities are generated automatically every 12 hours.
+- Live odds are refreshed every 2 minutes by the backend.
+- The dashboard refreshes its Neon-backed data automatically.
+- There is no manual scanner start/stop control.
+
+## Architecture
+
+**React/Vite website → Express backend → Neon PostgreSQL + Odds API → Arbitrage Engine → dashboard**
+
+Supabase is not used anywhere in the application.
