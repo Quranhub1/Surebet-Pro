@@ -2,6 +2,7 @@ import { aiPredictionService } from '../services/AiPredictionService';
 import { sql } from '../lib/db';
 
 const ANALYSIS_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const ANALYSIS_GAME_LIMIT = 40;
 
 export class ScannerScheduler {
   private isRunning = false;
@@ -11,6 +12,7 @@ export class ScannerScheduler {
     if (this.isRunning) return;
     this.isRunning = true;
     console.log('[AI] Automatic football analysis engine started.');
+    console.log(`[AI] Each automatic cycle targets up to ${ANALYSIS_GAME_LIMIT} upcoming games using Gemini + Groq review.`);
     console.log('[AI] Upcoming games are stored in Neon and completed games are retained for future analysis.');
     await this.runAnalysisIfDue();
     this.scheduleNextAnalysis();
@@ -27,7 +29,7 @@ export class ScannerScheduler {
       await this.executeAnalysis();
       this.scheduleNextAnalysis();
     }, ANALYSIS_INTERVAL_MS);
-    console.log(`[AI] Next automatic football analysis in approximately 12 hours.`);
+    console.log('[AI] Next automatic football analysis in approximately 12 hours.');
   }
 
   private async runAnalysisIfDue(): Promise<void> {
@@ -44,10 +46,10 @@ export class ScannerScheduler {
 
   private async executeAnalysis(): Promise<void> {
     try {
-      console.log('[AI] Starting automatic football analysis cycle...');
-      const predictions = await aiPredictionService.runAutomaticAnalysis(8);
+      console.log(`[AI] Starting automatic football analysis cycle for up to ${ANALYSIS_GAME_LIMIT} games...`);
+      const predictions = await aiPredictionService.runAutomaticAnalysis(ANALYSIS_GAME_LIMIT);
       await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = ${predictions.length ? 'success' : 'no_fixtures'} WHERE id = 1`;
-      console.log(`[AI] Cycle finished. ${predictions.length} upcoming games analyzed and stored.`);
+      console.log(`[AI] Cycle finished. ${predictions.length}/${ANALYSIS_GAME_LIMIT} upcoming games analyzed and stored.`);
     } catch (error) {
       console.error('[AI] Automatic football analysis failed:', error);
       await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = 'error' WHERE id = 1`;
