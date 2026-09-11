@@ -29,10 +29,10 @@ export function Auth() {
           },
         });
         if (error) throw error;
-        setMessage('Cadastro realizado! Verifique seu email para confirmar a conta.');
+        setMessage('Registration successful! Check your email to confirm your account.');
       }
     } catch (err: any) {
-      setError(err.message || 'Ocorreu um erro durante a autenticação.');
+      setError(err.message || 'An error occurred during authentication.');
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export function Auth() {
           Surebet<span className="text-indigo-600">Pro</span>
         </h2>
         <p className="mt-2 text-center text-sm font-medium text-slate-500">
-          {isLogin ? 'Faça login para acessar o painel' : 'Crie sua conta para começar a lucrar'}
+          {isLogin ? 'Sign in to access your dashboard' : 'Create your account to get started'}
         </p>
       </div>
 
@@ -82,13 +82,13 @@ export function Auth() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-11 bg-white border border-slate-300 rounded-xl py-3 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-all"
-                  placeholder="seu@email.com"
+                  placeholder="you@example.com"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-700">Senha</label>
+              <label className="block text-sm font-bold text-slate-700">Password</label>
               <div className="mt-2 relative rounded-xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Lock className="h-5 w-5 text-slate-400" />
@@ -109,7 +109,7 @@ export function Auth() {
               disabled={loading}
               className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? 'Entrar no Sistema' : 'Criar Conta')}
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? 'Sign In' : 'Create Account')}
             </button>
           </form>
 
@@ -119,7 +119,7 @@ export function Auth() {
                 <div className="w-full border-t border-slate-200" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-3 bg-white text-slate-500 font-medium">Ou</span>
+                <span className="px-3 bg-white text-slate-500 font-medium">Or</span>
               </div>
             </div>
 
@@ -128,7 +128,7 @@ export function Auth() {
                 onClick={() => setIsLogin(!isLogin)}
                 className="text-sm font-bold text-indigo-600 hover:text-indigo-800 transition-colors focus:outline-none focus:underline"
               >
-                {isLogin ? 'Não tem uma conta? Cadastre-se' : 'Já tem uma conta? Faça login'}
+                {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
               </button>
             </div>
           </div>
