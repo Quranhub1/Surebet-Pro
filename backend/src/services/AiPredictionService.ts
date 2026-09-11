@@ -103,11 +103,34 @@ export class AiPredictionService {
     }
 
     const parsed = this.parseJson(raw);
+    const aiItems = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.predictions)
+        ? parsed.predictions
+        : parsed?.prediction
+          ? [parsed.prediction]
+          : [];
+    console.log(`[AI] AI returned ${aiItems.length} predictions for ${selected.length} selected games.`);
     const byId = new Map(selected.map((fixture: any) => [String(fixture.fixture?.id), fixture]));
+    const byTeams = new Map(selected.map((fixture: any) => [
+      `${String(fixture.teams?.home?.name || '').trim().toLowerCase()}|${String(fixture.teams?.away?.name || '').trim().toLowerCase()}`,
+      fixture,
+    ]));
     const results: AiMatchPrediction[] = [];
-    for (const item of Array.isArray(parsed.predictions) ? parsed.predictions : []) {
-      const fixture = byId.get(String(item?.id));
-      if (!fixture) continue;
+    for (const item of aiItems) {
+      const rawId = item?.id ?? item?.fixtureId ?? item?.fixture_id ?? item?.fixture?.id;
+      let fixture = rawId != null ? byId.get(String(rawId)) : undefined;
+      if (!fixture) {
+        const home = item?.homeTeam ?? item?.home_team ?? item?.home ?? item?.teams?.home?.name;
+        const away = item?.awayTeam ?? item?.away_team ?? item?.away ?? item?.teams?.away?.name;
+        if (home && away) {
+          fixture = byTeams.get(`${String(home).trim().toLowerCase()}|${String(away).trim().toLowerCase()}`);
+        }
+      }
+      if (!fixture) {
+        console.warn(`[AI] Could not match AI prediction to a fixture. Returned id=${rawId ?? 'none'}, home=${item?.homeTeam ?? item?.home_team ?? 'unknown'}, away=${item?.awayTeam ?? item?.away_team ?? 'unknown'}`);
+        continue;
+      }
       const prediction: AiMatchPrediction = {
         id: String(fixture.fixture?.id), league: fixture.league?.name || 'Football', homeTeam: fixture.teams?.home?.name || 'Home', awayTeam: fixture.teams?.away?.name || 'Away', startTime: fixture.fixture?.date || new Date().toISOString(),
         winner: item?.winner === fixture.teams?.home?.name || item?.winner === fixture.teams?.away?.name ? item.winner : null,
@@ -119,6 +142,7 @@ export class AiPredictionService {
       await this.storePrediction(prediction, context);
     }
 
+    console.log(`[AI] Matched and stored ${results.length}/${selected.length} AI predictions.`);
     this.cache = { expiresAt: Date.now() + 60 * 60 * 1000, data: results };
     console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches analyzed and stored using ${usedProvider}/${usedModel}.`);
     return results;
