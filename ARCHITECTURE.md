@@ -1,35 +1,45 @@
-# System Architecture: Surebet Scanner Platform
+# System Architecture: Surebet Pro
 
-## 1. Overview
-A B2B/B2C SaaS platform for detecting sports betting arbitrage (surebets). The system continuously scans the Odds API, focused on **Superbet** and **Novibet**, processes odds through a mathematical calculation engine, and displays guaranteed-profit opportunities in real time.
+## Overview
+Surebet Pro is an automated sports-betting arbitrage platform. Neon PostgreSQL is the single source of truth for application data. The browser communicates with the Express backend and never connects directly to the database.
 
-## 2. API Usage Strategy (100 requests/hour)
-Due to the strict limit of the Odds API free plan, the architecture uses a **Smart Scanner Scheduler**:
-- **Consumption Rate:** 1 request every 36 seconds (1.6 requests/minute).
-- **Prioritization (Triage):**
-  1. The system makes one daily request to map all active sports and leagues.
-  2. The system filters events starting within the next 24 hours.
-  3. The request queue consumes the `/odds` endpoint filtered by `regions=eu` and `bookmakers=superbet,novibet`.
-- **Deduplication and Cache:** Results are cached in Redis/PostgreSQL. If an event was scanned within the last 15 minutes and is not about to start, it is skipped in the next scan cycle.
+## Runtime flow
 
-## 3. Technology Stack
-- **Frontend:** React, Vite, TypeScript, TailwindCSS, Recharts (charts).
-- **Backend:** Node.js, TypeScript, Express/Fastify.
-- **Database:** PostgreSQL (via Prisma ORM).
-- **Queues/Workers:** BullMQ + Redis (for scan scheduling).
+1. The backend starts and initializes the Neon PostgreSQL schema.
+2. The scheduler generates upcoming matches every 12 hours.
+3. The Odds API supplies event and bookmaker prices.
+4. The deterministic arbitrage engine identifies surebets and calculates stake percentages.
+5. Opportunities and event data are persisted in Neon.
+6. Live football and live arbitrage data are refreshed every 2 minutes.
+7. The React dashboard reads data through backend API endpoints.
 
-## 4. Data Normalization
-The normalization engine (`NormalizerEngine`) is critical. It translates team and market names that may differ between Superbet and Novibet.
-- Example: "Manchester Utd" (Superbet) vs "Man United" (Novibet).
-- Markets: `h2h` (Moneyline), `totals` (Over/Under), `spreads` (Handicap).
+## Technology Stack
 
-## 5. MVP Roadmap
-- **Phase 1 (Month 1):** Odds API integration, Base Arbitrage Engine (1x2 and O/U), Real-time Dashboard.
-- **Phase 2 (Month 2):** User Authentication, Stake Calculator, Advanced Filters.
-- **Phase 3 (Month 3):** Alert System (Email/Telegram), Admin Panel, Subscription Plans (Stripe).
+- **Frontend:** React, Vite, TypeScript, TailwindCSS, Recharts.
+- **Backend:** Node.js 22, TypeScript, Express.
+- **Database:** Neon PostgreSQL through `@neondatabase/serverless`.
+- **Authentication:** Neon-backed users with server-side password hashing and signed sessions.
+- **Sports data:** Odds API.
+- **Automation:** Long-running backend scheduler.
 
-## 6. Scalability Plan
-When the platform moves to a paid Odds API plan (for example, 10,000 requests/month):
-- Run multiple workers in parallel.
-- Implement WebSockets (Socket.io) to push real-time surebets to the frontend, eliminating the need for client-side polling.
-- Expand to more than 50 bookmakers.
+## Database
+
+The Neon database stores scanner configuration, users, alerts, events, surebet opportunities, and opportunity legs. Startup initialization creates missing tables and columns without requiring Supabase.
+
+## Automation
+
+The system intentionally has no user-controlled scheduler toggle or manual scanner button. The backend runs continuously, generating new match opportunities every 12 hours and refreshing live matches every 2 minutes.
+
+## Security
+
+Secrets such as `DATABASE_URL`, `AUTH_SECRET`, and `ODDS_API_KEY` remain server-side. They must be configured as deployment environment variables and must never be committed to the repository.
+
+## Scalability
+
+As traffic and provider limits grow, the scheduler can be moved to dedicated workers and the backend can expose server-sent events or WebSockets for lower-latency dashboard updates. Neon remains the database layer.
+
+## Database boundary
+
+**React/Vite → Express API → Neon PostgreSQL**
+
+The application contains no Supabase client, Supabase authentication, Supabase Realtime subscription, or Supabase database dependency.
