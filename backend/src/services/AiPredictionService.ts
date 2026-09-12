@@ -36,10 +36,10 @@ export class AiPredictionService {
 
   private async requestFootball(path: string, params: Record<string, string | number>) {
     const key = process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY;
-    if (!key) throw new Error('No API-Football key configured.');
+    if (!key && !String(process.env.BSD_API_KEY || '').trim()) throw new Error('No football data provider key configured.');
     const response = await axios.get(`${API_FOOTBALL_BASE_URL}${path}`, {
       params,
-      headers: { 'x-apisports-key': key, Accept: 'application/json' },
+      headers: { ...(key ? { 'x-apisports-key': key } : {}), Accept: 'application/json' },
       timeout: 30_000,
     });
     const errors = response.data?.errors;
@@ -54,7 +54,7 @@ export class AiPredictionService {
   public async runAutomaticAnalysis(limit = 40): Promise<AiMatchPrediction[]> {
     const models = getAiModels().filter(model => model.configured);
     if (!models.length) throw new Error('Neither Gemini nor Groq API key is configured.');
-    if (!(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY)) throw new Error('API-Football key is not configured.');
+    if (!(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY || String(process.env.BSD_API_KEY || '').trim())) throw new Error('No football data provider key configured.');
 
     await this.settleCompletedPredictions();
     const cycleExpiresAt = new Date(Date.now() + ANALYSIS_TTL_MS);
@@ -157,7 +157,6 @@ export class AiPredictionService {
   }
 
   public async getHistory(from?: string, to?: string): Promise<{ items: PredictionHistoryItem[]; summary: { total: number; correct: number; failed: number; pending: number; accuracy: number } }> {
-    await this.settleCompletedPredictions();
     const start = from ? new Date(`${from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86400000);
     const end = to ? new Date(`${to}T23:59:59.999Z`) : new Date();
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) throw new Error('Invalid history date range.');
@@ -180,6 +179,7 @@ export class AiPredictionService {
   }
 
   public async settleCompletedPredictions(): Promise<void> {
+    if (String(process.env.REALTIME_SETTLEMENT_MODE || 'true').toLowerCase() === 'true') return;
     const pending = await sql`
       SELECT p.fixture_id, p.winner, f.home_team, f.away_team, f.kickoff_at
       FROM football_ai_predictions p
@@ -242,7 +242,7 @@ export class AiPredictionService {
         }
         console.log(`[AI] Found ${fixtures.length} upcoming games for ${date}; ${found.length}/${limit} unique fixtures collected.`);
       } catch (error) {
-        console.warn(`[AI] Skipping unavailable API-Football date ${date}:`, error instanceof Error ? error.message : error);
+        console.warn(`[AI] Skipping unavailable football date ${date}:`, error instanceof Error ? error.message : error);
       }
     }
     found.sort((a, b) => new Date(a.fixture?.date || 0).getTime() - new Date(b.fixture?.date || 0).getTime());
