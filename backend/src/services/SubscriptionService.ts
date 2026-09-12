@@ -50,7 +50,7 @@ export async function requestPayment(userId: string): Promise<SubscriptionInfo> 
   const current = await getEffectiveSubscription(userId);
   if (current.status === 'active') throw new Error('Your Pro subscription is already active.');
   if (current.status === 'banned') throw new Error('Your account is banned.');
-  if (current.status === 'pending') return current;
+  if (current.status === 'pending' && current.requestedAt) return current;
   await sql`UPDATE subscriptions SET status = 'pending', requested_at = NOW(), updated_at = NOW() WHERE user_id = ${userId}`;
   return ensureUserSubscription(userId);
 }
