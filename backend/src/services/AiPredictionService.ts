@@ -45,14 +45,15 @@ export class AiPredictionService {
     const results: AiMatchPrediction[] = [];
     const configuredProviders: AiProvider[] = [...(geminiConfigured ? ['gemini' as AiProvider] : []), ...(groqConfigured ? ['groq' as AiProvider] : [])];
     if (!configuredProviders.length) throw new Error('No configured AI provider is available.');
+    const providerPreference = await this.getProviderPreference(configuredProviders, aiConfig.provider);
+    console.log(`[AI] Dynamic provider preference: ${providerPreference.join(' -> ')}.`);
 
     for (let batchStart = 0; batchStart < enriched.length; batchStart += AI_BATCH_SIZE) {
       const batch = enriched.slice(batchStart, batchStart + AI_BATCH_SIZE);
       const batchNumber = Math.floor(batchStart / AI_BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(enriched.length / AI_BATCH_SIZE);
-      const orderedProviders = [aiConfig.provider, ...configuredProviders.filter(provider => provider !== aiConfig.provider)];
-      const primary = orderedProviders[(batchNumber - 1) % orderedProviders.length];
-      const fallback = orderedProviders.find(provider => provider !== primary && configuredProviders.includes(provider));
+      const primary = providerPreference[(batchNumber - 1) % providerPreference.length];
+      const fallback = providerPreference.find(provider => provider !== primary);
       const prompt = `Analyze ONLY these ${batch.length} upcoming fixtures. Preserve each fixture id exactly. The fixture feed is authoritative for team names, competition and kickoff. Historical games are evidence when available.\n\n${JSON.stringify(batch, null, 2)}`;
       let raw = '';
       let usedProvider: AiProvider | null = null;
@@ -96,7 +97,7 @@ export class AiPredictionService {
             keyFactors: Array.isArray(item?.keyFactors) ? item.keyFactors.filter((v: unknown): v is string => typeof v === 'string').slice(0, 6) : [],
             confidence: this.toNumber(item?.confidence), homeWin: this.toNumber(item?.homeWin), draw: this.toNumber(item?.draw), awayWin: this.toNumber(item?.awayWin),
             underOver: this.stringOrNull(item?.underOver), predictedHomeGoals: this.toNumber(item?.predictedHomeGoals), predictedAwayGoals: this.toNumber(item?.predictedAwayGoals),
-            aiProvider: usedProvider, aiModel: usedProvider === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b'),
+            aiProvider: usedProvider, aiModel: usedProvider === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b'),
           };
           results.push(prediction);
           const context = batch.find(entry => entry.fixture.id === prediction.id);
@@ -118,6 +119,29 @@ export class AiPredictionService {
     const data = rows.map((row: any) => this.rowToPrediction(row));
     if (data.length) this.cache = { expiresAt: Date.now() + 30 * 60 * 1000, data };
     return data;
+  }
+
+  private async getProviderPreference(configured: AiProvider[], preferred: AiProvider): Promise<AiProvider[]> {
+    if (configured.length < 2) return configured;
+    try {
+      const rows = await sql`SELECT p.ai_provider, COUNT(*)::int AS evaluated, SUM(CASE WHEN p.winner = CASE WHEN f.home_score > f.away_score THEN f.home_team WHEN f.away_score > f.home_score THEN f.away_team ELSE 'Draw' END THEN 1 ELSE 0 END)::int AS correct FROM football_ai_predictions p JOIN football_fixtures f ON f.id = p.fixture_id WHERE p.ai_provider IN ('gemini','groq') AND f.status IN ('FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN') GROUP BY p.ai_provider`;
+      const scores = new Map<string, number>();
+      for (const row of rows as any[]) {
+        const evaluated = Number(row.evaluated) || 0;
+        const correct = Number(row.correct) || 0;
+        scores.set(String(row.ai_provider), evaluated >= 5 ? correct / evaluated : 0.5);
+      }
+      return [...configured].sort((a, b) => {
+        const scoreDiff = (scores.get(b) ?? 0.5) - (scores.get(a) ?? 0.5);
+        if (Math.abs(scoreDiff) > 0.01) return scoreDiff;
+        if (a === preferred) return -1;
+        if (b === preferred) return 1;
+        return a.localeCompare(b);
+      });
+    } catch (error) {
+      console.warn('[AI] Provider performance lookup failed; using configured preference:', error instanceof Error ? error.message : error);
+      return [...configured].sort(provider => provider === preferred ? -1 : 1);
+    }
   }
 
   private async syncCompletedHistory(daysBack: number): Promise<void> {
