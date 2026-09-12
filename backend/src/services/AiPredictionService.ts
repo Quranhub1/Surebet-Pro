@@ -30,22 +30,21 @@ export class AiPredictionService {
 
     if (!selected.length) {
       this.cache = { expiresAt: Date.now() + 15 * 60 * 1000, data: [] };
+      await this.syncCompletedHistory(7);
       await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = 'no_fixtures' WHERE id = 1`;
       return [];
     }
 
     selected.forEach((match, index) => console.log(`[AI] Game ${index + 1}/${selected.length}: ${match.homeTeam} vs ${match.awayTeam} | ${match.league} | kickoff ${match.kickoff} | football-data ${match.id}`));
     await Promise.all(selected.map(match => this.storeFixture(match)));
+    await this.syncCompletedHistory(7);
 
     const enriched = await Promise.all(selected.map(async match => ({ fixture: this.normalizeFixture(match), history: await this.getStoredHistory(match) })));
     const system = `You are SureBet Pro's football analysis AI. Analyze football only. Never mention bookmakers, odds, stakes, ROI, arbitrage, gambling or betting advice. Use only the supplied fixture data and stored completed-game history. Do not invent injuries, lineups, statistics, form or results. Return ONLY valid JSON with a top-level predictions array. Every supplied fixture must receive exactly one prediction. Each prediction must contain id, winner, advice, analysis, keyFactors, confidence, homeWin, draw, awayWin, underOver, predictedHomeGoals, predictedAwayGoals. analysis must be 2-4 sentences. keyFactors must contain 3-6 short evidence-based points. confidence and probabilities are 0-100; probabilities should sum to approximately 100.`;
 
     const results: AiMatchPrediction[] = [];
     const preferredProvider: AiProvider = aiConfig.provider;
-    const configuredProviders: AiProvider[] = [
-      ...(geminiConfigured ? ['gemini' as AiProvider] : []),
-      ...(groqConfigured ? ['groq' as AiProvider] : []),
-    ];
+    const configuredProviders: AiProvider[] = [...(geminiConfigured ? ['gemini' as AiProvider] : []), ...(groqConfigured ? ['groq' as AiProvider] : [])];
     if (!configuredProviders.length) throw new Error('No configured AI provider is available.');
 
     for (let batchStart = 0; batchStart < enriched.length; batchStart += AI_BATCH_SIZE) {
@@ -58,7 +57,6 @@ export class AiPredictionService {
       const prompt = `Analyze ONLY these ${batch.length} upcoming fixtures. Preserve each fixture id exactly. The fixture feed is authoritative for team names, competition and kickoff. Historical games are evidence when available.\n\n${JSON.stringify(batch, null, 2)}`;
       let raw = '';
       let usedProvider: AiProvider | null = null;
-
       try {
         raw = await generateWithAi({ provider: primary, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
         usedProvider = primary;
@@ -70,24 +68,16 @@ export class AiPredictionService {
             raw = await generateWithAi({ provider: fallback, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
             usedProvider = fallback;
             console.log(`[AI] Batch ${batchNumber}/${totalBatches} fallback completed with ${fallback} (${batch.length} games).`);
-          } catch (fallbackError) {
-            console.error(`[AI] Batch ${batchNumber}/${totalBatches} fallback ${fallback} failed:`, fallbackError instanceof Error ? fallbackError.message : fallbackError);
-          }
+          } catch (fallbackError) { console.error(`[AI] Batch ${batchNumber}/${totalBatches} fallback ${fallback} failed:`, fallbackError instanceof Error ? fallbackError.message : fallbackError); }
         }
       }
-
-      if (!raw || !usedProvider) {
-        console.error(`[AI] Batch ${batchNumber}/${totalBatches} produced no analysis; continuing so other fetched games are still processed.`);
-        continue;
-      }
-
+      if (!raw || !usedProvider) { console.error(`[AI] Batch ${batchNumber}/${totalBatches} produced no analysis; continuing so other fetched games are still processed.`); continue; }
       try {
         const parsed = this.parseJson(raw);
         const aiItems = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.predictions) ? parsed.predictions : parsed?.prediction ? [parsed.prediction] : [];
         const byId = new Map(batch.map(entry => [String(entry.fixture.id), entry.fixture]));
         const byTeams = new Map(batch.map(entry => [`${entry.fixture.home.trim().toLowerCase()}|${entry.fixture.away.trim().toLowerCase()}`, entry.fixture]));
         const generatedIds = new Set<string>();
-
         for (const item of aiItems) {
           const rawId = item?.id ?? item?.fixtureId ?? item?.fixture_id;
           let match = rawId != null ? byId.get(String(rawId)) : undefined;
@@ -98,7 +88,6 @@ export class AiPredictionService {
           }
           if (!match || generatedIds.has(String(match.id))) continue;
           generatedIds.add(String(match.id));
-
           const prediction: AiMatchPrediction = {
             id: String(match.id), league: match.league, homeTeam: match.home, awayTeam: match.away, startTime: match.kickoff,
             winner: item?.winner === match.home || item?.winner === match.away ? item.winner : null,
@@ -113,14 +102,10 @@ export class AiPredictionService {
           await this.storePrediction(prediction, context);
           console.log(`[AI] Prediction generated ${results.length}/${selected.length}: ${prediction.homeTeam} vs ${prediction.awayTeam} | ${prediction.league} | ${usedProvider}`);
         }
-
         const missing = batch.filter(entry => !generatedIds.has(entry.fixture.id)).map(entry => `${entry.fixture.home} vs ${entry.fixture.away}`);
         if (missing.length) console.warn(`[AI] Batch ${batchNumber}/${totalBatches} returned ${missing.length} fixture(s) without predictions: ${missing.join('; ')}`);
-      } catch (error) {
-        console.error(`[AI] Batch ${batchNumber}/${totalBatches} returned invalid analysis JSON:`, error instanceof Error ? error.message : error);
-      }
+      } catch (error) { console.error(`[AI] Batch ${batchNumber}/${totalBatches} returned invalid analysis JSON:`, error instanceof Error ? error.message : error); }
     }
-
     this.cache = { expiresAt: Date.now() + ANALYSIS_CACHE_MS, data: results };
     console.log(`[AI] Automatic analysis completed: ${results.length}/${selected.length} matches stored across ${Math.ceil(selected.length / AI_BATCH_SIZE)} small AI batches.`);
     return results;
@@ -134,6 +119,15 @@ export class AiPredictionService {
     return data;
   }
 
+  private async syncCompletedHistory(daysBack: number): Promise<void> {
+    try {
+      const completed = await footballDataService.getCompletedMatches(daysBack);
+      if (!completed.length) { console.log(`[History] No completed football-data.org matches found in the last ${daysBack} days.`); return; }
+      await Promise.all(completed.map(match => this.storeFixture(match)));
+      console.log(`[History] Saved ${completed.length} completed football-data.org matches for prediction history.`);
+    } catch (error) { console.warn('[History] Completed-game sync failed:', error instanceof Error ? error.message : error); }
+  }
+
   private async storeFixture(match: FootballDataMatch): Promise<void> {
     await sql`INSERT INTO football_fixtures (id, league_id, league_name, country, season, home_team_id, home_team, away_team_id, away_team, kickoff_at, status, home_score, away_score, raw_data, updated_at) VALUES (${match.id}, ${null}, ${match.league}, ${match.country}, ${match.season}, ${match.homeId}, ${match.homeTeam}, ${match.awayId}, ${match.awayTeam}, ${match.kickoff}, ${match.status}, ${match.homeScore}, ${match.awayScore}, ${JSON.stringify(match.raw)}, NOW()) ON CONFLICT (id) DO UPDATE SET league_id=EXCLUDED.league_id, league_name=EXCLUDED.league_name, country=EXCLUDED.country, season=EXCLUDED.season, home_team_id=EXCLUDED.home_team_id, home_team=EXCLUDED.home_team, away_team_id=EXCLUDED.away_team_id, away_team=EXCLUDED.away_team, kickoff_at=EXCLUDED.kickoff_at, status=EXCLUDED.status, home_score=EXCLUDED.home_score, away_score=EXCLUDED.away_score, raw_data=EXCLUDED.raw_data, updated_at=NOW()`;
   }
@@ -144,15 +138,11 @@ export class AiPredictionService {
 
   private async getStoredHistory(match: FootballDataMatch) {
     if (!match.homeId && !match.awayId) return [];
-    return sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${match.kickoff} AND status IN ('FINISHED','FT','AET','PEN') AND (home_team_id IN (${match.homeId}, ${match.awayId}) OR away_team_id IN (${match.homeId}, ${match.awayId})) ORDER BY kickoff_at DESC LIMIT 12`;
+    return sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${match.kickoff} AND status IN ('FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN') AND (home_team_id IN (${match.homeId}, ${match.awayId}) OR away_team_id IN (${match.homeId}, ${match.awayId})) ORDER BY kickoff_at DESC LIMIT 12`;
   }
 
   private normalizeFixture(match: FootballDataMatch) { return { id: match.id, league: match.league, country: match.country, home: match.homeTeam, away: match.awayTeam, kickoff: match.kickoff, status: match.status, homeScore: match.homeScore, awayScore: match.awayScore, raw: match.raw }; }
-
-  private rowToPrediction(row: any): AiMatchPrediction {
-    return { id: String(row.id), league: row.league_name || 'Football', homeTeam: row.home_team || 'Home', awayTeam: row.away_team || 'Away', startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: this.toNumber(row.confidence), homeWin: this.toNumber(row.home_win), draw: this.toNumber(row.draw), awayWin: this.toNumber(row.away_win), underOver: row.under_over || null, predictedHomeGoals: this.toNumber(row.predicted_home_goals), predictedAwayGoals: this.toNumber(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null };
-  }
-
+  private rowToPrediction(row: any): AiMatchPrediction { return { id: String(row.id), league: row.league_name || 'Football', homeTeam: row.home_team || 'Home', awayTeam: row.away_team || 'Away', startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: this.toNumber(row.confidence), homeWin: this.toNumber(row.home_win), draw: this.toNumber(row.draw), awayWin: this.toNumber(row.away_win), underOver: row.under_over || null, predictedHomeGoals: this.toNumber(row.predicted_home_goals), predictedAwayGoals: this.toNumber(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null }; }
   private parseJson(raw: string): any { const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim(); try { return JSON.parse(cleaned); } catch { const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}'); if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)); throw new Error('AI returned invalid football analysis JSON'); } }
   private stringOrNull(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null; }
   private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%', '').trim()); return Number.isFinite(n) ? n : null; }
