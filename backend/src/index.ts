@@ -34,8 +34,12 @@ function bsdStatusToApiFootball(status: unknown): string {
 }
 
 function bsdEventToFixture(event: any): any {
-  const home = event?.home_team || event?.home || {};
-  const away = event?.away_team || event?.away || {};
+  const homeRaw = event?.home_team || event?.home || {};
+  const awayRaw = event?.away_team || event?.away || {};
+  const homeName = typeof homeRaw === 'string' ? homeRaw : homeRaw?.name || event?.home_team_name || event?.home_name || '';
+  const awayName = typeof awayRaw === 'string' ? awayRaw : awayRaw?.name || event?.away_team_name || event?.away_name || '';
+  const homeId = typeof homeRaw === 'object' ? (homeRaw?.id ?? event?.home_team_id ?? null) : (event?.home_team_id ?? null);
+  const awayId = typeof awayRaw === 'object' ? (awayRaw?.id ?? event?.away_team_id ?? null) : (event?.away_team_id ?? null);
   const league = event?.league || {};
   const season = event?.season || {};
   return {
@@ -51,8 +55,8 @@ function bsdEventToFixture(event: any): any {
       season: season?.year ?? event?.season_year ?? null,
     },
     teams: {
-      home: { id: home?.id ?? event?.home_team_id ?? null, name: home?.name ?? event?.home ?? 'Home' },
-      away: { id: away?.id ?? event?.away_team_id ?? null, name: away?.name ?? event?.away ?? 'Away' },
+      home: { id: homeId, name: homeName || 'Home' },
+      away: { id: awayId, name: awayName || 'Away' },
     },
     goals: {
       home: event?.home_score ?? event?.score?.home ?? null,
