@@ -7,8 +7,6 @@ const PAYMENT_AMOUNT_UGX = 5000;
 const PAYMENT_NUMBER = '0749846848';
 const PAYMENT_NAME = 'Kabali Madina';
 
-const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/register', '/api/auth/login', '/api/auth/me', '/api/subscription', '/api/subscription/request']);
-
 function sessionUserId(req: express.Request): string | null { const header = req.headers.authorization || ''; return header.startsWith('Bearer ') ? verifySession(header.slice(7)) : null; }
 function configuredAdminEmail(): string { return String(process.env.ADMIN_EMAIL || '').trim().toLowerCase(); }
 async function isAdmin(userId: string): Promise<boolean> { const adminEmail = configuredAdminEmail(); if (!adminEmail) return false; const rows = await sql`SELECT email FROM users WHERE id = ${userId} LIMIT 1`; return String(rows[0]?.email || '').trim().toLowerCase() === adminEmail; }
@@ -110,33 +108,4 @@ subscriptionRouter.post('/api/admin/subscriptions/:userId/revoke', async (req, r
   } catch (error) { console.error('[Admin] Subscription revoke failed:', error); return res.status(500).json({ ok: false, error: 'Failed to revoke subscription' }); }
 });
 
-let installed = false;
-export function installSubscriptionGateway(): void {
-  if (installed) return;
-  installed = true;
-  const proto = express.application as any;
-  for (const method of ['get', 'post', 'patch', 'delete', 'put']) {
-    const original = proto[method];
-    proto[method] = function patchedRoute(path: any, ...handlers: any[]) {
-      if (typeof path === 'string' && path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !path.startsWith('/api/admin/')) return original.call(this, path, requireAppSubscription, ...handlers);
-      return original.call(this, path, ...handlers);
-    };
-  }
-  const originalListen = proto.listen;
-  proto.listen = function patchedListen(...args: any[]) {
-    if (!this.__surebetSubscriptionRouterInstalled) {
-      const router = this._router || this.router;
-      const before = Array.isArray(router?.stack) ? router.stack.length : 0;
-      this.use(subscriptionRouter);
-      const after = Array.isArray(router?.stack) ? router.stack.length : before;
-      if (router?.stack && after > before) {
-        const added = router.stack.splice(before);
-        router.stack.unshift(...added);
-      }
-      this.__surebetSubscriptionRouterInstalled = true;
-    }
-    return originalListen.apply(this, args);
-  };
-}
-
-export { ensureUserSubscriptionColumns };
+export { ensureUserSubscriptionColumns, requireAppSubscription };
