@@ -10,7 +10,7 @@ const state = { gemini: { used: [], cooldown: 0 }, groq: { used: [], cooldown: 0
 const isPlaceholder = v => !v || ['home','away','home team','away team','team home','team away','unknown','unknown league','football','tbd','n/a','na','null'].includes(String(v).trim().toLowerCase());
 const text = v => {
   if (typeof v === 'string' && v.trim() && !isPlaceholder(v)) return v.trim();
-  if (v && typeof v === 'object') for (const k of ['name','teamName','team_name','displayName','title','shortName']) if (typeof v[k] === 'string' && v[k].trim() && !isPlaceholder(v[k])) return v[k].trim();
+  if (v && typeof v === 'object') for (const k of ['name','teamName','team_name','displayName','title','shortName','short_name']) if (typeof v[k] === 'string' && v[k].trim() && !isPlaceholder(v[k])) return v[k].trim();
   return null;
 };
 function find(root, keys, depth=0, seen=new Set()) {
@@ -31,7 +31,8 @@ function normalize(item) {
   const away = text(aObj) || find(root, ['away_team_name','awayTeamName','away_team','awayTeam','away']);
   const league = text(lObj) || find(root, ['league_name','leagueName','competition_name','competitionName','tournament_name','tournamentName','league','competition','tournament']);
   const num = v => v == null || v === '' ? null : (Number.isFinite(Number(String(v).replace('%','').trim())) ? Number(String(v).replace('%','').trim()) : null);
-  return { id: String(root.fixture?.id ?? root.fixture_id ?? root.match_id ?? root.event_id ?? root.id ?? '').trim(), leagueId: Number(lObj?.id ?? root.league_id ?? root.leagueId ?? 0) || null, league: league || 'Football', country: lObj?.country || root.country || root.league_country || '', season: Number(lObj?.season ?? root.season ?? 0) || null, homeId: Number(hObj?.id ?? root.home_team_id ?? root.homeTeamId ?? 0) || null, home: home || 'Home', awayId: Number(aObj?.id ?? root.away_team_id ?? root.awayTeamId ?? 0) || null, away: away || 'Away', kickoff: root.fixture?.date || root.kickoff_at || root.kickoff || root.startTime || root.start_time || root.event?.startTime || root.event?.date || new Date().toISOString(), status: String(root.fixture?.status?.short || root.status?.short || root.status || 'NS'), homeScore: num(root.goals?.home ?? root.home_score), awayScore: num(root.goals?.away ?? root.away_score) };
+  const kickoff = root.fixture?.date || root.event_date || root.eventDate || root.kickoff_at || root.kickoff || root.startTime || root.start_time || root.event?.event_date || root.event?.eventDate || root.event?.startTime || root.event?.date || null;
+  return { id: String(root.fixture?.id ?? root.fixture_id ?? root.match_id ?? root.event_id ?? root.id ?? '').trim(), leagueId: Number(lObj?.id ?? root.league_id ?? root.leagueId ?? 0) || null, league: league || 'Football', country: lObj?.country || root.country || root.league_country || '', season: Number(lObj?.season ?? root.season ?? 0) || null, homeId: Number(hObj?.id ?? root.home_team_id ?? root.homeTeamId ?? 0) || null, home: home || 'Home', awayId: Number(aObj?.id ?? root.away_team_id ?? root.awayTeamId ?? 0) || null, away: away || 'Away', kickoff: kickoff || new Date().toISOString(), status: String(root.fixture?.status?.short || root.status?.short || root.status || 'NS'), homeScore: num(root.goals?.home ?? root.home_score), awayScore: num(root.goals?.away ?? root.away_score) };
 }
 AiPredictionService.prototype.normalizeFixture = normalize;
 
@@ -74,7 +75,7 @@ AiPredictionService.prototype.fetchUpcomingFixtures = async function(limit = 40)
   const now = Date.now();
   const bsdEvents = [];
 
-  for (let offset = 0; offset < 3 && found.length < limit; offset += 1) {
+  for (let offset = 0; offset < 7 && found.length < limit; offset += 1) {
     const date = new Date(now + offset * 86400000).toISOString().slice(0, 10);
     try {
       const events = [];
@@ -89,6 +90,7 @@ AiPredictionService.prototype.fetchUpcomingFixtures = async function(limit = 40)
         const count = Number(response.data?.count);
         if (!page.length || !response.data?.next || (Number.isFinite(count) && events.length >= count)) break;
       }
+      let validForDate = 0;
       for (const event of events) {
         const fixture = bsdEventToApiFixture(event);
         if (!fixture || new Date(fixture.fixture.date).getTime() < now) continue;
@@ -97,9 +99,10 @@ AiPredictionService.prototype.fetchUpcomingFixtures = async function(limit = 40)
         known.add(id);
         found.push(fixture);
         bsdEvents.push(fixture);
+        validForDate += 1;
         if (found.length >= limit) break;
       }
-      console.log(`[AI] BSD fallback found ${bsdEvents.length} valid upcoming games for ${date}; ${found.length}/${limit} unique fixtures collected.`);
+      console.log(`[AI] BSD fallback found ${validForDate} valid upcoming games for ${date}; ${found.length}/${limit} unique fixtures collected.`);
     } catch (error) {
       console.warn(`[AI] BSD fallback unavailable for ${date}:`, error instanceof Error ? error.message : error);
     }
@@ -107,6 +110,7 @@ AiPredictionService.prototype.fetchUpcomingFixtures = async function(limit = 40)
 
   found.sort((a, b) => new Date(a.fixture?.date || 0).getTime() - new Date(b.fixture?.date || 0).getTime());
   if (bsdEvents.length) console.log(`[AI] API-Football unavailable; using BSD fallback for ${bsdEvents.length} upcoming games.`);
+  else console.warn('[AI] API-Football unavailable; BSD returned no valid future fixtures in the seven-day fallback window.');
   return found.slice(0, limit);
 };
 
@@ -115,7 +119,7 @@ async function repairBadFixtureRows() {
   const db = neon(process.env.DATABASE_URL);
   let rows = [];
   try {
-    rows = await db`SELECT id, raw_data, league_name, home_team, away_team, kickoff_at FROM football_fixtures WHERE LOWER(BTRIM(COALESCE(home_team,''))) IN ('','home','home team','unknown','tbd','n/a','na') OR LOWER(BTRIM(COALESCE(away_team,''))) IN ('','away','away team','unknown','tbd','n/a','na') OR LOWER(BTRIM(COALESCE(league_name,''))) IN ('','unknown','unknown league','n/a','na') ORDER BY kickoff_at ASC LIMIT 200`;
+    rows = await db`SELECT id, raw_data, league_name, home_team, away_team, kickoff_at FROM football_fixtures WHERE LOWER(BTRIM(COALESCE(home_team,''))) IN ('','home','home team','unknown','unknown team','tbd','n/a','na') OR LOWER(BTRIM(COALESCE(away_team,''))) IN ('','away','away team','unknown','unknown team','tbd','n/a','na') OR LOWER(BTRIM(COALESCE(league_name,''))) IN ('','unknown','unknown league','n/a','na') ORDER BY kickoff_at ASC LIMIT 200`;
   } catch (error) {
     console.warn('[AI] Placeholder fixture preflight query failed:', error?.message || error);
     return 0;
@@ -179,4 +183,4 @@ AiPredictionService.prototype.getPredictions = async function(limit = 40) {
   return rows;
 };
 
-console.log('[AI] Runtime fixture metadata/router patch loaded. API-Football suspension now falls back to BSD fixtures for analysis, placeholder fixtures are blocked, real team names are enforced, and provider routing is balanced.');
+console.log('[AI] Runtime fixture metadata/router patch loaded. BSD event_date is mapped into kickoff, API-Football suspension falls back to BSD fixtures for analysis, placeholder fixtures are blocked, real team names are enforced, and provider routing is balanced.');
