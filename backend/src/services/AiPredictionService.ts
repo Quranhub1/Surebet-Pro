@@ -187,7 +187,7 @@ export class AiPredictionService {
     const system = `You are SureBet Pro's football analysis AI. Analyze one upcoming football match only. Do not discuss bookmakers, odds, stakes, ROI, arbitrage or gambling. Use only the supplied evidence. Never invent injuries, lineups, statistics or results. Return ONLY JSON. Schema: {"winner":"home team or away team or null","advice":"short football outcome","analysis":"2-3 evidence-based sentences","keyFactors":["3-5 short factors"],"confidence":0-100,"homeWin":0-100,"draw":0-100,"awayWin":0-100,"underOver":"short goal outlook","predictedHomeGoals":number,"predictedAwayGoals":number}. Probabilities should total about 100.`;
     const prompt = `Match ${position}/${total}: ${context.home} vs ${context.away}. League: ${context.league}. Kickoff: ${context.kickoff}.\nAPI-Football forecast: ${JSON.stringify(context.apiPrediction)}\nComparison: ${JSON.stringify(this.compactObject(context.comparison))}\nH2H: ${JSON.stringify(context.h2h)}\nStored recent completed games: ${JSON.stringify(context.storedHistory?.slice?.(0, 8) || [])}\nMake a cautious, evidence-based prediction. Return the JSON object only.`;
     const estimatedTokens = Math.ceil((system.length + prompt.length) / 4) + AI_MAX_OUTPUT_TOKENS;
-    const providers = this.rankProviders(estimatedTokens);
+    const providers = this.rankProviders(position, estimatedTokens);
     let lastError: unknown = null;
 
     for (const provider of providers) {
@@ -213,19 +213,25 @@ export class AiPredictionService {
     return null;
   }
 
-  private rankProviders(estimatedTokens: number): AiProvider[] {
+  private rankProviders(position: number, estimatedTokens: number): AiProvider[] {
     const configured = getAiModels().filter(item => item.configured).map(item => item.provider);
     const now = Date.now();
-    const scored = configured.map(provider => {
+    if (configured.length <= 1) return configured;
+
+    // Normal operation is strict round-robin by game position: game 1 Gemini, game 2 Groq,
+    // game 3 Gemini, game 4 Groq, and so on. If the preferred provider is cooling down or
+    // unavailable, the other configured provider is used as the fallback for that game.
+    const preferred: AiProvider = position % 2 === 1 ? 'gemini' : 'groq';
+    const ordered = [preferred, preferred === 'gemini' ? 'groq' : 'gemini'];
+
+    return ordered.filter(provider => {
       const state = providerState[provider];
       state.usedTokens = state.usedTokens.filter(timestamp => timestamp > now - PROVIDER_WINDOW_MS);
       const projected = state.usedTokens.length * 0 + estimatedTokens;
-      const utilization = projected / PROVIDER_BUDGETS[provider];
-      const reliability = state.successes + state.failures === 0 ? 0 : state.failures / (state.successes + state.failures);
-      return { provider, score: utilization + reliability * 0.8 + (state.cooldownUntil > now ? 100 : 0) };
+      const withinBudget = projected <= PROVIDER_BUDGETS[provider];
+      const available = state.cooldownUntil <= now;
+      return configured.includes(provider) && (withinBudget || provider === ordered[1]) && available;
     });
-    scored.sort((a, b) => a.score - b.score);
-    return scored.map(item => item.provider);
   }
 
   private recordProviderUsage(provider: AiProvider, estimatedTokens: number, success: boolean, errorMessage = ''): void {
