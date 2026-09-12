@@ -32,7 +32,7 @@ function normalize(item) {
   const league = text(lObj) || find(root, ['league_name','leagueName','competition_name','competitionName','tournament_name','tournamentName','league','competition','tournament']);
   const num = v => v == null || v === '' ? null : (Number.isFinite(Number(String(v).replace('%','').trim())) ? Number(String(v).replace('%','').trim()) : null);
   const kickoff = root.fixture?.date || root.event_date || root.eventDate || root.kickoff_at || root.kickoff || root.startTime || root.start_time || root.event?.event_date || root.event?.eventDate || root.event?.startTime || root.event?.date || null;
-  return { id: String(root.fixture?.id ?? root.fixture_id ?? root.match_id ?? root.event_id ?? root.id ?? '').trim(), leagueId: Number(lObj?.id ?? root.league_id ?? root.leagueId ?? 0) || null, league: league || 'Football', country: lObj?.country || root.country || root.league_country || '', season: Number(lObj?.season ?? root.season ?? 0) || null, homeId: Number(hObj?.id ?? root.home_team_id ?? root.homeTeamId ?? 0) || null, home: home || 'Home', awayId: Number(aObj?.id ?? root.away_team_id ?? root.awayTeamId ?? 0) || null, away: away || 'Away', kickoff: kickoff || new Date().toISOString(), status: String(root.fixture?.status?.short || root.status?.short || root.status || 'NS'), homeScore: num(root.goals?.home ?? root.home_score), awayScore: num(root.goals?.away ?? root.away_score) };
+  return { id: String(root.fixture?.id ?? root.fixture_id ?? root.match_id ?? root.event_id ?? root.id ?? '').trim(), leagueId: Number(lObj?.id ?? root.league_id ?? root.leagueId ?? 0) || null, league: league || 'Football', country: lObj?.country || root.country || root.league_country || '', season: Number(lObj?.season ?? root.season ?? 0) || null, homeId: Number(hObj?.id ?? root.home_team_id ?? root.homeTeamId ?? 0) || null, home: home || 'Home', awayId: Number(aObj?.id ?? root.away_team_id ?? root.awayTeamId ?? 0) || null, away: away || 'Away', kickoff: kickoff || null, status: String(root.fixture?.status?.short || root.status?.short || root.status || 'NS'), homeScore: num(root.goals?.home ?? root.home_score), awayScore: num(root.goals?.away ?? root.away_score) };
 }
 AiPredictionService.prototype.normalizeFixture = normalize;
 
@@ -50,7 +50,7 @@ AiPredictionService.prototype.rankProviders = function(position, estimatedTokens
 
 function bsdEventToApiFixture(event) {
   const normalized = normalize(event);
-  if (!normalized.id || isPlaceholder(normalized.home) || isPlaceholder(normalized.away)) return null;
+  if (!normalized.id || isPlaceholder(normalized.home) || isPlaceholder(normalized.away) || !normalized.kickoff) return null;
   const kickoffMs = new Date(normalized.kickoff).getTime();
   if (!Number.isFinite(kickoffMs)) return null;
   return {
@@ -60,6 +60,33 @@ function bsdEventToApiFixture(event) {
     goals: { home: null, away: null },
     __surebetSource: 'bsd',
   };
+}
+
+async function fetchBsdUpcomingForDate(date, key) {
+  const statuses = ['upcoming', 'notstarted', undefined];
+  const all = [];
+  for (const status of statuses) {
+    const events = [];
+    for (let pageOffset = 0; pageOffset < 20 * 200; pageOffset += 200) {
+      const params = { date_from: date, date_to: date, limit: 200, offset: pageOffset };
+      if (status) params.status = status;
+      const response = await axios.get('https://sports.bzzoiro.com/api/v2/events/', {
+        params,
+        headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
+        timeout: 12_000,
+      });
+      const page = Array.isArray(response.data?.results) ? response.data.results : [];
+      events.push(...page);
+      const count = Number(response.data?.count);
+      if (!page.length || !response.data?.next || (Number.isFinite(count) && events.length >= count)) break;
+    }
+    all.push(...events);
+    if (events.length) {
+      console.log(`[AI] BSD upcoming query ${date}${status ? ` status=${status}` : ''} returned ${events.length} events.`);
+      if (status === 'upcoming' || status === 'notstarted') break;
+    }
+  }
+  return Array.from(new Map(all.map(event => [String(event?.id), event])).values());
 }
 
 const originalFetchUpcomingFixtures = AiPredictionService.prototype.fetchUpcomingFixtures;
@@ -78,18 +105,7 @@ AiPredictionService.prototype.fetchUpcomingFixtures = async function(limit = 40)
   for (let offset = 0; offset < 7 && found.length < limit; offset += 1) {
     const date = new Date(now + offset * 86400000).toISOString().slice(0, 10);
     try {
-      const events = [];
-      for (let pageOffset = 0; pageOffset < 20 * 200; pageOffset += 200) {
-        const response = await axios.get('https://sports.bzzoiro.com/api/v2/events/', {
-          params: { date_from: date, date_to: date, limit: 200, offset: pageOffset },
-          headers: { Authorization: `Token ${bsdKey}`, Accept: 'application/json' },
-          timeout: 12_000,
-        });
-        const page = Array.isArray(response.data?.results) ? response.data.results : [];
-        events.push(...page);
-        const count = Number(response.data?.count);
-        if (!page.length || !response.data?.next || (Number.isFinite(count) && events.length >= count)) break;
-      }
+      const events = await fetchBsdUpcomingForDate(date, bsdKey);
       let validForDate = 0;
       for (const event of events) {
         const fixture = bsdEventToApiFixture(event);
@@ -183,4 +199,4 @@ AiPredictionService.prototype.getPredictions = async function(limit = 40) {
   return rows;
 };
 
-console.log('[AI] Runtime fixture metadata/router patch loaded. BSD event_date is mapped into kickoff, API-Football suspension falls back to BSD fixtures for analysis, placeholder fixtures are blocked, real team names are enforced, and provider routing is balanced.');
+console.log('[AI] Runtime fixture metadata/router patch loaded. BSD event_date is mapped into kickoff, upcoming/notstarted BSD status fallbacks are enabled, API-Football suspension falls back to BSD fixtures for analysis, placeholder fixtures are blocked, real team names are enforced, and provider routing is balanced.');
