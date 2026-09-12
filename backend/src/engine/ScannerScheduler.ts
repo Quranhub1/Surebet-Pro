@@ -1,3 +1,4 @@
+import '../services/DynamicAiRouter';
 import { aiPredictionService } from '../services/AiPredictionService';
 import { realtimeSettlementService } from '../services/RealtimeSettlementService';
 import { acquireAnalysisLock, releaseAnalysisLock, sql } from '../lib/db';
