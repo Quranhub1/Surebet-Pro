@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Activity, Mail, Lock, UserRound, AlertCircle, Loader2 } from 'lucide-react';
 import { AUTH_TOKEN_KEY } from '../contexts/AuthContext';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://surebet-pro-n81z.onrender.com').replace(/\/$/, '');
 
 export function Auth() {
   const [isLogin, setIsLogin] = useState(true); const [name, setName] = useState(''); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [loading, setLoading] = useState(false); const [error, setError] = useState<string | null>(null);
@@ -10,7 +10,10 @@ export function Auth() {
     e.preventDefault(); setLoading(true); setError(null);
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/${isLogin ? 'login' : 'register'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Authentication failed.');
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json() : null;
+      if (!response.ok) throw new Error(data?.error || `Authentication service returned ${response.status}`);
+      if (!data?.token) throw new Error('Authentication service returned an invalid response.');
       localStorage.setItem(AUTH_TOKEN_KEY, data.token); window.location.href = '/';
     } catch (err) { setError(err instanceof Error ? err.message : 'Authentication failed.'); } finally { setLoading(false); }
   };
