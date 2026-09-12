@@ -1,12 +1,14 @@
 import axios from 'axios';
 import { sql } from '../lib/db';
 
+const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
 const BSD_BASE_URL = 'https://sports.bzzoiro.com/api/v2';
 const SETTLEMENT_DELAY_MS = 105 * 60 * 1000;
 const RETRY_DELAY_MS = 5 * 60 * 1000;
 const MAX_RETRIES = 24;
-const DATE_CACHE_MS = 2 * 60 * 1000;
+const BSD_DATE_CACHE_MS = 5 * 60 * 1000;
 const MAX_DATE_PAGES = 20;
+const REQUEST_TIMEOUT_MS = 12_000;
 
 type PendingMatch = {
   fixture_id: string;
@@ -40,17 +42,32 @@ class RealtimeSettlementService {
   }
 
   public async refreshSchedules(): Promise<void> {
-    // Repair legacy placeholder metadata before scheduling. The dashboard and
-    // settlement scheduler must never operate on synthetic Home/Away names.
+    // Repair legacy placeholders from the original API-Football payload.
+    // Explicitly treat Home/Away/Unknown as missing, not as valid metadata.
     await sql`
       UPDATE football_fixtures
-      SET league_name = COALESCE(NULLIF(league_name, ''), raw_data->'league'->>'name', league_name),
-          home_team = COALESCE(NULLIF(home_team, ''), raw_data->'teams'->'home'->>'name', home_team),
-          away_team = COALESCE(NULLIF(away_team, ''), raw_data->'teams'->'away'->>'name', away_team),
+      SET league_name = CASE
+            WHEN LOWER(BTRIM(COALESCE(league_name, ''))) IN ('', 'unknown', 'unknown league', 'n/a', 'na')
+              THEN COALESCE(NULLIF(BTRIM(raw_data->'league'->>'name'), ''), league_name)
+            ELSE league_name
+          END,
+          home_team = CASE
+            WHEN LOWER(BTRIM(COALESCE(home_team, ''))) IN ('', 'home', 'home team', 'unknown', 'tbd', 'n/a', 'na')
+              THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'home'->>'name'), ''), home_team)
+            ELSE home_team
+          END,
+          away_team = CASE
+            WHEN LOWER(BTRIM(COALESCE(away_team, ''))) IN ('', 'away', 'away team', 'unknown', 'tbd', 'n/a', 'na')
+              THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'away'->>'name'), ''), away_team)
+            ELSE away_team
+          END,
           updated_at = NOW()
-      WHERE (league_name IS NULL OR league_name = '' OR lower(league_name) IN ('unknown league', 'unknown'))
-         OR (home_team IS NULL OR home_team = '' OR lower(home_team) IN ('home', 'home team', 'unknown'))
-         OR (away_team IS NULL OR away_team = '' OR lower(away_team) IN ('away', 'away team', 'unknown'))`;
+      WHERE raw_data IS NOT NULL
+        AND (
+          LOWER(BTRIM(COALESCE(league_name, ''))) IN ('', 'unknown', 'unknown league', 'n/a', 'na')
+          OR LOWER(BTRIM(COALESCE(home_team, ''))) IN ('', 'home', 'home team', 'unknown', 'tbd', 'n/a', 'na')
+          OR LOWER(BTRIM(COALESCE(away_team, ''))) IN ('', 'away', 'away team', 'unknown', 'tbd', 'n/a', 'na')
+        )`;
 
     const pending = await sql<PendingMatch[]>`
       SELECT p.fixture_id, p.winner, p.predicted_home_goals, p.predicted_away_goals,
@@ -114,19 +131,21 @@ class RealtimeSettlementService {
         return;
       }
 
-      const retry = (this.retries.get(fixtureId) || 0) + 1;
-      this.retries.set(fixtureId, retry);
-      if (retry <= MAX_RETRIES) {
-        this.timers.set(fixtureId, setTimeout(() => void this.checkFixture(row), RETRY_DELAY_MS));
-        console.log(`[History] ${row.home_team} vs ${row.away_team} is not final yet. Retry ${retry}/${MAX_RETRIES} in 5 minutes.`);
-      } else {
-        console.warn(`[History] Giving up active polling for ${row.home_team} vs ${row.away_team}; the next scheduler refresh will pick it up.`);
-      }
+      this.scheduleRetry(row, `${row.home_team} vs ${row.away_team} is not final yet.`);
     } catch (error) {
-      const retry = (this.retries.get(fixtureId) || 0) + 1;
-      this.retries.set(fixtureId, retry);
-      if (retry <= MAX_RETRIES) this.timers.set(fixtureId, setTimeout(() => void this.checkFixture(row), RETRY_DELAY_MS));
-      console.warn(`[History] Result refresh failed for ${row.home_team} vs ${row.away_team}:`, error instanceof Error ? error.message : error);
+      this.scheduleRetry(row, `Result refresh failed for ${row.home_team} vs ${row.away_team}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private scheduleRetry(row: PendingMatch, message: string): void {
+    const fixtureId = String(row.fixture_id);
+    const retry = (this.retries.get(fixtureId) || 0) + 1;
+    this.retries.set(fixtureId, retry);
+    if (retry <= MAX_RETRIES) {
+      this.timers.set(fixtureId, setTimeout(() => void this.checkFixture(row), RETRY_DELAY_MS));
+      console.log(`[History] ${message} Retry ${retry}/${MAX_RETRIES} in 5 minutes.`);
+    } else {
+      console.warn(`[History] ${message} Giving up active polling; the next scheduler refresh will pick it up.`);
     }
   }
 
@@ -138,51 +157,102 @@ class RealtimeSettlementService {
   }
 
   private async fetchEvent(row: PendingMatch): Promise<any> {
-    const key = String(process.env.BSD_API_KEY || '').trim();
-    if (!key) throw new Error('BSD_API_KEY is not configured.');
+    const apiKey = String(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY || '').trim();
 
-    // API-Football and BSD can use different fixture IDs. A numeric ID match is
-    // only accepted after team validation when the event contains team names.
-    try {
-      const response = await axios.get(`${BSD_BASE_URL}/events/${encodeURIComponent(row.fixture_id)}/`, {
-        headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
-        timeout: 20_000,
-      });
-      const data = response.data;
-      const direct = data?.event || data?.result || (Array.isArray(data?.results) ? data.results[0] : data?.results) || data;
-      if (direct && this.isMatchingEvent(direct, row)) return direct;
-    } catch (error) {
-      if (axios.isAxiosError(error) && ![400, 404].includes(error.response?.status || 0)) throw error;
+    // Fixture IDs are created from API-Football. Use that ID first, which avoids
+    // trying to rediscover the match in a second provider with different IDs.
+    if (apiKey) {
+      try {
+        const response = await axios.get(`${API_FOOTBALL_BASE_URL}/fixtures`, {
+          params: { id: row.fixture_id },
+          headers: { 'x-apisports-key': apiKey, Accept: 'application/json' },
+          timeout: REQUEST_TIMEOUT_MS,
+        });
+        const fixture = Array.isArray(response.data?.response) ? response.data.response[0] : null;
+        if (fixture && this.isMatchingApiFootballFixture(fixture, row)) {
+          console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using API-Football fixture ${row.fixture_id}.`);
+          return fixture;
+        }
+      } catch (error) {
+        console.warn(`[History] API-Football fixture lookup failed for ${row.home_team} vs ${row.away_team}:`, error instanceof Error ? error.message : error);
+      }
+
+      // If a stored ID came from another source, find the fixture by date and
+      // team names with one API-Football request before touching BSD.
+      try {
+        const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
+        const response = await axios.get(`${API_FOOTBALL_BASE_URL}/fixtures`, {
+          params: { date },
+          headers: { 'x-apisports-key': apiKey, Accept: 'application/json' },
+          timeout: REQUEST_TIMEOUT_MS,
+        });
+        const fixtures = Array.isArray(response.data?.response) ? response.data.response : [];
+        const match = this.findBestApiFootballMatch(fixtures, row);
+        if (match) {
+          console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using API-Football date lookup.`);
+          return match;
+        }
+      } catch (error) {
+        console.warn(`[History] API-Football date lookup failed for ${row.home_team} vs ${row.away_team}:`, error instanceof Error ? error.message : error);
+      }
     }
 
-    const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
+    // BSD is now a genuine fallback, not the primary settlement database.
+    const bsdKey = String(process.env.BSD_API_KEY || '').trim();
+    if (!bsdKey) throw new Error('No football result provider is configured.');
+    return this.fetchFromBsd(row, bsdKey);
+  }
 
-    // BSD supports fuzzy team_name filtering. Query both sides, then score all
-    // returned candidates instead of requiring one brittle string threshold.
+  private isMatchingApiFootballFixture(fixture: any, row: PendingMatch): boolean {
+    const home = fixture?.teams?.home?.name;
+    const away = fixture?.teams?.away?.name;
+    if (!home || !away) return false;
+    return this.teamPairMatches(home, away, row) && this.kickoffMatches(fixture?.fixture?.date, row.kickoff_at);
+  }
+
+  private findBestApiFootballMatch(fixtures: any[], row: PendingMatch): any | null {
+    let best: { fixture: any; score: number } | null = null;
+    for (const fixture of fixtures) {
+      const home = fixture?.teams?.home?.name;
+      const away = fixture?.teams?.away?.name;
+      if (!home || !away || !this.kickoffMatches(fixture?.fixture?.date, row.kickoff_at)) continue;
+      const direct = this.teamSimilarity(home, row.home_team) + this.teamSimilarity(away, row.away_team);
+      const swapped = this.teamSimilarity(home, row.away_team) + this.teamSimilarity(away, row.home_team);
+      const score = Math.max(direct, swapped);
+      if (score >= 1.5 && (!best || score > best.score)) best = { fixture, score };
+    }
+    return best?.fixture || null;
+  }
+
+  private async fetchFromBsd(row: PendingMatch, key: string): Promise<any> {
+    const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
     const candidates: any[] = [];
-    for (const teamName of [row.home_team, row.away_team]) {
+
+    // One targeted BSD query is enough in most cases. Query the less ambiguous
+    // side first and only query the other side if the first produced no match.
+    const names = [row.home_team, row.away_team].sort((a, b) => this.normalizeTeamName(a).length - this.normalizeTeamName(b).length);
+    for (const teamName of names) {
       try {
         const response = await axios.get(`${BSD_BASE_URL}/events/`, {
           params: { date_from: date, date_to: date, team_name: teamName, limit: 200, offset: 0 },
           headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
-          timeout: 20_000,
+          timeout: REQUEST_TIMEOUT_MS,
         });
         const page = Array.isArray(response.data?.results) ? response.data.results : [];
         candidates.push(...page);
+        const match = this.findBestMatch(candidates, row);
+        if (match) {
+          console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD fallback.`);
+          return match;
+        }
       } catch (error) {
         console.warn(`[History] BSD team search failed for ${teamName}:`, error instanceof Error ? error.message : error);
       }
     }
 
-    const bestTargeted = this.findBestMatch(candidates, row);
-    if (bestTargeted) {
-      console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD targeted team search.`);
-      return bestTargeted;
-    }
-
     const events = await this.getEventsForDate(date, key);
     const match = this.findBestMatch(events, row);
-    if (!match) throw new Error(`BSD event not found for ${row.home_team} vs ${row.away_team} on ${date}`);
+    if (!match) throw new Error(`Result event not found for ${row.home_team} vs ${row.away_team} on ${date}`);
     return match;
   }
 
@@ -191,7 +261,7 @@ class RealtimeSettlementService {
     let best: { event: any; score: number } | null = null;
     for (const event of unique) {
       const score = this.matchScore(event, row);
-      if (score >= 1.0 && (!best || score > best.score)) best = { event, score };
+      if (score >= 1.5 && (!best || score > best.score)) best = { event, score };
     }
     return best?.event || null;
   }
@@ -200,17 +270,27 @@ class RealtimeSettlementService {
     const home = this.extractTeamName(event?.home_team ?? event?.homeTeam ?? event?.home ?? event?.teams?.home ?? event?.event?.home_team ?? event?.event?.home);
     const away = this.extractTeamName(event?.away_team ?? event?.awayTeam ?? event?.away ?? event?.teams?.away ?? event?.event?.away_team ?? event?.event?.away);
     if (!home || !away) return 0;
-
     const direct = this.teamSimilarity(home, row.home_team) + this.teamSimilarity(away, row.away_team);
     const swapped = this.teamSimilarity(home, row.away_team) + this.teamSimilarity(away, row.home_team);
     const teamScore = Math.max(direct, swapped);
-    if (teamScore < 1.0) return 0;
-
+    if (teamScore < 1.5) return 0;
     const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time ?? event?.event?.kickoff_at ?? event?.event?.date;
     if (!eventKickoff) return teamScore;
-    const difference = Math.abs(new Date(eventKickoff).getTime() - new Date(row.kickoff_at).getTime());
-    if (!Number.isFinite(difference) || difference > 18 * 60 * 60 * 1000) return 0;
-    return teamScore + (difference <= 3 * 60 * 60 * 1000 ? 0.25 : difference <= 9 * 60 * 60 * 1000 ? 0.1 : 0);
+    return this.kickoffMatches(eventKickoff, row.kickoff_at) ? teamScore + 0.25 : 0;
+  }
+
+  private teamPairMatches(home: unknown, away: unknown, row: PendingMatch): boolean {
+    const direct = this.teamSimilarity(home, row.home_team) + this.teamSimilarity(away, row.away_team);
+    const swapped = this.teamSimilarity(home, row.away_team) + this.teamSimilarity(away, row.home_team);
+    return Math.max(direct, swapped) >= 1.5;
+  }
+
+  private kickoffMatches(left: unknown, right: unknown): boolean {
+    if (!left || !right) return true;
+    const a = new Date(String(left)).getTime();
+    const b = new Date(String(right)).getTime();
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    return Math.abs(a - b) <= 18 * 60 * 60 * 1000;
   }
 
   private async getEventsForDate(date: string, key: string): Promise<any[]> {
@@ -222,15 +302,14 @@ class RealtimeSettlementService {
       const response = await axios.get(`${BSD_BASE_URL}/events/`, {
         params: { date_from: date, date_to: date, limit: 200, offset },
         headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
-        timeout: 20_000,
+        timeout: REQUEST_TIMEOUT_MS,
       });
       const page = Array.isArray(response.data?.results) ? response.data.results : [];
       events.push(...page);
       const count = Number(response.data?.count);
       if (!page.length || !response.data?.next || (Number.isFinite(count) && events.length >= count)) break;
     }
-
-    this.dateCache.set(date, { expiresAt: Date.now() + DATE_CACHE_MS, events });
+    this.dateCache.set(date, { expiresAt: Date.now() + BSD_DATE_CACHE_MS, events });
     console.log(`[History] Loaded ${events.length} BSD events for ${date} across paginated result pages.`);
     return events;
   }
@@ -244,9 +323,9 @@ class RealtimeSettlementService {
       .replace(/\b(football|fc|cf|sc|club|women|woman|w|u19|u20|u21|u23|ii|reserves?)\b/g, ' ')
       .replace(/\b(2)\b/g, 'ii')
       .replace(/\butd\b/g, 'united')
-      .replace(/\b(st)\b/g, 'saint')
-      .replace(/\b(dep)\b/g, 'deportivo')
-      .replace(/\b(atletico\s+de)\b/g, 'atletico')
+      .replace(/\bst\b/g, 'saint')
+      .replace(/\bdep\b/g, 'deportivo')
+      .replace(/\batletico\s+de\b/g, 'atletico')
       .replace(/[^a-z0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -287,17 +366,15 @@ class RealtimeSettlementService {
     return id === null || id === undefined || id === '' ? null : String(id);
   }
 
-  private isMatchingEvent(event: any, row: PendingMatch): boolean {
-    const home = this.extractTeamName(event?.home_team ?? event?.homeTeam ?? event?.home ?? event?.teams?.home ?? event?.event?.home_team ?? event?.event?.home);
-    const away = this.extractTeamName(event?.away_team ?? event?.awayTeam ?? event?.away ?? event?.teams?.away ?? event?.event?.away_team ?? event?.event?.away);
-    // If the provider gives no names, an ID-only response is still usable.
-    const eventId = this.extractEventId(event);
-    if ((!home || !away) && eventId === String(row.fixture_id)) return true;
-    return this.matchScore(event, row) >= 1.0;
-  }
-
   private normalizeStatus(fixture: any): string {
-    const raw = String(fixture?.status || fixture?.event_status || fixture?.time?.status || '').toLowerCase();
+    const raw = String(
+      fixture?.fixture?.status?.short ??
+      fixture?.status ??
+      fixture?.event_status ??
+      fixture?.time?.status ??
+      fixture?.event?.status ??
+      ''
+    ).toLowerCase();
     if (['finished', 'ft', 'ended', 'completed'].includes(raw)) return 'FT';
     if (['aet'].includes(raw)) return 'AET';
     if (['pen', 'penalties'].includes(raw)) return 'PEN';
@@ -306,8 +383,8 @@ class RealtimeSettlementService {
 
   private readScore(fixture: any, side: 'home' | 'away'): number | null {
     const value = side === 'home'
-      ? fixture?.home_score ?? fixture?.score?.home ?? fixture?.scores?.home ?? fixture?.goals?.home
-      : fixture?.away_score ?? fixture?.score?.away ?? fixture?.scores?.away ?? fixture?.goals?.away;
+      ? fixture?.goals?.home ?? fixture?.home_score ?? fixture?.score?.home ?? fixture?.scores?.home
+      : fixture?.goals?.away ?? fixture?.away_score ?? fixture?.score?.away ?? fixture?.scores?.away;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
