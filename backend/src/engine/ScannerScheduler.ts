@@ -1,42 +1,43 @@
 import { aiPredictionService } from '../services/AiPredictionService';
+import { realtimeSettlementService } from '../services/RealtimeSettlementService';
 import { acquireAnalysisLock, releaseAnalysisLock, sql } from '../lib/db';
 
 const ANALYSIS_INTERVAL_MS = 12 * 60 * 60 * 1000;
-const SETTLEMENT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const ANALYSIS_GAME_LIMIT = 40;
+const SETTLEMENT_REFRESH_MS = 15 * 60 * 1000;
 
 export class ScannerScheduler {
   private isRunning = false;
   private analysisTimer?: ReturnType<typeof setTimeout>;
-  private settlementTimer?: ReturnType<typeof setTimeout>;
+  private settlementRefreshTimer?: ReturnType<typeof setTimeout>;
 
   public async start(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
     console.log('[AI] Automatic football analysis engine started.');
-    console.log(`[AI] Each cycle targets up to ${ANALYSIS_GAME_LIMIT} games with alternating Gemini/Groq routing.`);
-    await this.settleNow();
+    console.log(`[AI] Each cycle targets up to ${ANALYSIS_GAME_LIMIT} games with dynamic Gemini/Groq load balancing.`);
+    await realtimeSettlementService.start();
     await this.runAnalysisIfDue();
     await this.scheduleNextAnalysis();
-    await this.scheduleNextSettlement();
+    await this.scheduleSettlementRefresh();
   }
 
   public stop(): void {
     this.isRunning = false;
     if (this.analysisTimer) clearTimeout(this.analysisTimer);
-    if (this.settlementTimer) clearTimeout(this.settlementTimer);
+    if (this.settlementRefreshTimer) clearTimeout(this.settlementRefreshTimer);
+    realtimeSettlementService.stop();
   }
 
-  private async scheduleNextSettlement(): Promise<void> {
+  private async scheduleSettlementRefresh(): Promise<void> {
     if (!this.isRunning) return;
-    if (this.settlementTimer) clearTimeout(this.settlementTimer);
-    this.settlementTimer = setTimeout(async () => { await this.settleNow(); await this.scheduleNextSettlement(); }, SETTLEMENT_INTERVAL_MS);
-    console.log(`[History] Next automatic result settlement in approximately ${(SETTLEMENT_INTERVAL_MS / 3600000).toFixed(0)} hours.`);
-  }
-
-  private async settleNow(): Promise<void> {
-    try { await aiPredictionService.settleCompletedPredictions(); }
-    catch (error) { console.error('[History] Automatic settlement cycle failed:', error); }
+    if (this.settlementRefreshTimer) clearTimeout(this.settlementRefreshTimer);
+    this.settlementRefreshTimer = setTimeout(async () => {
+      try { await realtimeSettlementService.refreshSchedules(); }
+      catch (error) { console.error('[History] Could not refresh realtime settlement schedules:', error); }
+      await this.scheduleSettlementRefresh();
+    }, SETTLEMENT_REFRESH_MS);
+    console.log(`[History] Realtime result checks are scheduled per match; pending-match schedule refresh runs every ${(SETTLEMENT_REFRESH_MS / 60000).toFixed(0)} minutes.`);
   }
 
   private async scheduleNextAnalysis(): Promise<void> {
@@ -60,7 +61,12 @@ export class ScannerScheduler {
 
   private async executeAnalysis(): Promise<void> {
     if (!await acquireAnalysisLock()) { console.log('[AI] Another analysis worker owns the persistent lock. Skipping this cycle.'); return; }
-    try { const predictions = await aiPredictionService.runAutomaticAnalysis(ANALYSIS_GAME_LIMIT); await releaseAnalysisLock(predictions.length ? 'success' : 'no_fixtures'); console.log(`[AI] Cycle finished. ${predictions.length}/${ANALYSIS_GAME_LIMIT} games have valid analyses.`); }
+    try {
+      const predictions = await aiPredictionService.runAutomaticAnalysis(ANALYSIS_GAME_LIMIT);
+      await releaseAnalysisLock(predictions.length ? 'success' : 'no_fixtures');
+      await realtimeSettlementService.refreshSchedules();
+      console.log(`[AI] Cycle finished. ${predictions.length}/${ANALYSIS_GAME_LIMIT} games have valid analyses.`);
+    }
     catch (error) { console.error('[AI] Automatic football analysis failed:', error); await releaseAnalysisLock('error'); }
   }
 }
