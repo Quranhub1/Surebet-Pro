@@ -122,6 +122,21 @@ export function installSubscriptionGateway(): void {
       return original.call(this, path, ...handlers);
     };
   }
+  const originalListen = proto.listen;
+  proto.listen = function patchedListen(...args: any[]) {
+    if (!this.__surebetSubscriptionRouterInstalled) {
+      const router = this._router || this.router;
+      const before = Array.isArray(router?.stack) ? router.stack.length : 0;
+      this.use(subscriptionRouter);
+      const after = Array.isArray(router?.stack) ? router.stack.length : before;
+      if (router?.stack && after > before) {
+        const added = router.stack.splice(before);
+        router.stack.unshift(...added);
+      }
+      this.__surebetSubscriptionRouterInstalled = true;
+    }
+    return originalListen.apply(this, args);
+  };
 }
 
 export { ensureUserSubscriptionColumns };
