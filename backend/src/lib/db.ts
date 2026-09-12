@@ -83,8 +83,13 @@ export async function ensureDatabase(): Promise<void> {
 
   await sql`CREATE TABLE IF NOT EXISTS football_ai_predictions (fixture_id text PRIMARY KEY, winner text, advice text, analysis text, key_factors jsonb NOT NULL DEFAULT '[]'::jsonb, confidence double precision, home_win double precision, draw double precision, away_win double precision, under_over text, predicted_home_goals double precision, predicted_away_goals double precision, ai_provider text, ai_model text, source_prediction jsonb, expires_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`;
   await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS expires_at timestamptz`;
+  await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS prediction_result text`;
+  await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS actual_home_score integer`;
+  await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS actual_away_score integer`;
+  await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS settled_at timestamptz`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_updated ON football_ai_predictions (updated_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_expires ON football_ai_predictions (expires_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_result ON football_ai_predictions (prediction_result, settled_at DESC)`;
 
   await sql`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, email text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL DEFAULT 'USER', created_at timestamptz NOT NULL DEFAULT now())`;
   await sql`CREATE TABLE IF NOT EXISTS user_alerts (id text PRIMARY KEY, user_id text NOT NULL, min_roi double precision NOT NULL, sport_key text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`;
