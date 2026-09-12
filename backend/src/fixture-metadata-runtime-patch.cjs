@@ -1,18 +1,21 @@
 const serviceModule = require('./services/AiPredictionService');
 const { AiPredictionService } = serviceModule;
 const { getAiModels } = require('./services/AiModelService');
+const { neon } = require('@neondatabase/serverless');
 
 const WINDOW = 60_000;
 const BUDGETS = { gemini: 20_000, groq: 6_500 };
 const state = { gemini: { used: [], cooldown: 0 }, groq: { used: [], cooldown: 0 } };
-const isPlaceholder = v => !v || ['home','away','home team','away team','team home','team away','tbd','unknown','n/a','null'].includes(String(v).trim().toLowerCase());
+const isPlaceholder = v => !v || ['home','away','home team','away team','team home','team away','unknown','unknown league','football','tbd','n/a','na','null'].includes(String(v).trim().toLowerCase());
 const text = v => {
   if (typeof v === 'string' && v.trim() && !isPlaceholder(v)) return v.trim();
   if (v && typeof v === 'object') for (const k of ['name','teamName','team_name','displayName','title','shortName']) if (typeof v[k] === 'string' && v[k].trim() && !isPlaceholder(v[k])) return v[k].trim();
   return null;
 };
 function find(root, keys, depth=0, seen=new Set()) {
-  if (!root || typeof root !== 'object' || depth > 7 || seen.has(root)) return null;
+  if (root == null || depth > 10) return null;
+  if (typeof root === 'string') { try { root = JSON.parse(root); } catch { return null; } }
+  if (!root || typeof root !== 'object' || seen.has(root)) return null;
   seen.add(root);
   for (const k of keys) if (Object.prototype.hasOwnProperty.call(root, k)) { const t = text(root[k]); if (t) return t; }
   for (const v of Object.values(root)) { const t = find(v, keys, depth + 1, seen); if (t) return t; }
@@ -43,17 +46,12 @@ AiPredictionService.prototype.rankProviders = function(position, estimatedTokens
   return out;
 };
 
-// Neon can occasionally return a transient fetch failure while the service is
-// warming or multiple background jobs hit it together. Retry the complete
-// analysis cycle without changing the 12-hour retention semantics. Existing
-// predictions are reused on a retry, so this does not regenerate paid AI work.
 const originalRunAutomaticAnalysis = AiPredictionService.prototype.runAutomaticAnalysis;
 AiPredictionService.prototype.runAutomaticAnalysis = async function(limit) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      return await originalRunAutomaticAnalysis.call(this, limit);
-    } catch (error) {
+    try { return await originalRunAutomaticAnalysis.call(this, limit); }
+    catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
       const transient = /fetch failed|ECONNRESET|ETIMEDOUT|timeout|connection|socket/i.test(message);
@@ -64,6 +62,43 @@ AiPredictionService.prototype.runAutomaticAnalysis = async function(limit) {
     }
   }
   throw lastError;
+};
+
+// Last-mile guarantee: the dashboard must never receive placeholder names.
+// Existing DB rows are checked first from raw_data, then refreshed from the
+// football provider when raw_data is insufficient. Repaired metadata is also
+// persisted so subsequent requests do not need another provider lookup.
+const originalGetPredictions = AiPredictionService.prototype.getPredictions;
+AiPredictionService.prototype.getPredictions = async function(limit = 40) {
+  const rows = await originalGetPredictions.call(this, limit);
+  if (!rows?.length || !process.env.DATABASE_URL) return rows;
+  const sql = neon(process.env.DATABASE_URL);
+  let repaired = 0;
+  for (const row of rows) {
+    if (!isPlaceholder(row.homeTeam) && !isPlaceholder(row.awayTeam) && !isPlaceholder(row.league)) continue;
+    let fixed = null;
+    try {
+      const stored = await sql`SELECT raw_data FROM football_fixtures WHERE id = ${String(row.id)} LIMIT 1`;
+      if (stored[0]?.raw_data) fixed = normalize(stored[0].raw_data);
+    } catch (error) { console.warn(`[AI] Could not read raw fixture ${row.id}:`, error?.message || error); }
+    if (!fixed || isPlaceholder(fixed.home) || isPlaceholder(fixed.away) || isPlaceholder(fixed.league)) {
+      try {
+        const data = await this.requestFootball('/fixtures', { id: String(row.id) });
+        const fixture = Array.isArray(data?.response) ? data.response[0] : null;
+        if (fixture) fixed = normalize(fixture);
+      } catch (error) { console.warn(`[AI] Provider refresh failed for fixture ${row.id}:`, error?.message || error); }
+    }
+    if (!fixed || isPlaceholder(fixed.home) || isPlaceholder(fixed.away)) continue;
+    row.homeTeam = fixed.home;
+    row.awayTeam = fixed.away;
+    if (!isPlaceholder(fixed.league)) row.league = fixed.league;
+    repaired += 1;
+    try {
+      await sql`UPDATE football_fixtures SET league_id=${fixed.leagueId}, league_name=${fixed.league}, country=${fixed.country}, season=${fixed.season}, home_team_id=${fixed.homeId}, home_team=${fixed.home}, away_team_id=${fixed.awayId}, away_team=${fixed.away}, kickoff_at=${fixed.kickoff}, status=${fixed.status}, home_score=${fixed.homeScore}, away_score=${fixed.awayScore}, raw_data=${JSON.stringify({fixture:{id:fixed.id,date:fixed.kickoff,status:{short:fixed.status}},league:{id:fixed.leagueId,name:fixed.league,country:fixed.country,season:fixed.season},teams:{home:{id:fixed.homeId,name:fixed.home},away:{id:fixed.awayId,name:fixed.away}},goals:{home:fixed.homeScore,away:fixed.awayScore}})}, updated_at=NOW() WHERE id=${String(row.id)}`;
+    } catch (error) { console.warn(`[AI] Could not persist repaired fixture ${row.id}:`, error?.message || error); }
+  }
+  if (repaired) console.log(`[AI] Last-mile fixture display repair: ${repaired} prediction(s) corrected.`);
+  return rows;
 };
 
 console.log('[AI] Runtime fixture metadata/router patch loaded. Real team names are enforced, provider routing is balanced, and transient analysis failures retry safely.');
