@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
+import { History } from './pages/History';
 import { Auth } from './pages/Auth';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Loader2, Menu } from 'lucide-react';
@@ -29,6 +30,7 @@ function AppRoutes() {
       </div>
       <Routes>
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </main>
