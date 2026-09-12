@@ -18,8 +18,6 @@ export interface FootballDataMatch {
 }
 
 const BASE_URL = 'https://api.football-data.org/v4';
-
-// These are the competitions exposed on the football-data.org free plan.
 export const FREE_COMPETITION_CODES = ['WC', 'CL', 'BL1', 'DED', 'BSA', 'PD', 'FL1', 'ELC', 'PPL', 'EC', 'SA', 'PL'];
 
 export class FootballDataService {
@@ -27,21 +25,13 @@ export class FootballDataService {
 
   private request(path: string, params: Record<string, string | number> = {}) {
     if (!this.token) throw new Error('FOOTBALL_DATA_API_TOKEN is not configured.');
-    return axios.get(`${BASE_URL}${path}`, {
-      params,
-      headers: { 'X-Auth-Token': this.token, Accept: 'application/json' },
-      timeout: 20000,
-    }).then(response => response.data);
+    return axios.get(`${BASE_URL}${path}`, { params, headers: { 'X-Auth-Token': this.token, Accept: 'application/json' }, timeout: 20000 }).then(response => response.data);
   }
 
   public isConfigured(): boolean { return Boolean(this.token); }
 
   public async getMatches(from: string, to: string, competitions = FREE_COMPETITION_CODES): Promise<FootballDataMatch[]> {
-    const data = await this.request('/matches', {
-      dateFrom: from,
-      dateTo: to,
-      competitions: competitions.join(','),
-    });
+    const data = await this.request('/matches', { dateFrom: from, dateTo: to, competitions: competitions.join(',') });
     return (Array.isArray(data?.matches) ? data.matches : []).map((match: any) => this.normalize(match));
   }
 
@@ -50,9 +40,15 @@ export class FootballDataService {
     const from = this.formatDate(now);
     const to = this.formatDate(new Date(now.getTime() + days * 86400000));
     const matches = await this.getMatches(from, to);
-    return matches
-      .filter(match => ['SCHEDULED', 'TIMED'].includes(match.status))
-      .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
+    return matches.filter(match => ['SCHEDULED', 'TIMED'].includes(match.status)).sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
+  }
+
+  public async getCompletedMatches(daysBack = 7): Promise<FootballDataMatch[]> {
+    const now = new Date();
+    const from = this.formatDate(new Date(now.getTime() - daysBack * 86400000));
+    const to = this.formatDate(now);
+    const matches = await this.getMatches(from, to);
+    return matches.filter(match => ['FINISHED', 'AWAITING_PENALTIES', 'FINISHED_AET', 'FINISHED_PEN'].includes(match.status) && match.homeScore != null && match.awayScore != null).sort((a, b) => new Date(b.kickoff).getTime() - new Date(a.kickoff).getTime());
   }
 
   public async getLiveMatches(): Promise<FootballDataMatch[]> {
@@ -79,12 +75,7 @@ export class FootballDataService {
     };
   }
 
-  private numberOrNull(value: unknown): number | null {
-    if (value === null || value === undefined || value === '') return null;
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
-  }
-
+  private numberOrNull(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
 }
 
