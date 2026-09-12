@@ -1,0 +1,66 @@
+name: Repair fixture metadata v2
+on: push
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch when triggered
+        run: |
+          if [ ! -f .github/fixture-fix-trigger ]; then
+            echo "No fixture repair trigger; nothing to do."
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('backend/src/services/AiPredictionService.ts')
+          s = p.read_text()
+          s = s.replace("await this.storeFixture(fixture.raw || fixture, cycleExpiresAt);", "await this.storeFixture(fixture, cycleExpiresAt);")
+          s = s.replace("const base = this.normalizeFixture(fixture.raw || fixture);", "const base = this.normalizeFixture(fixture);")
+          old = "private normalizeFixture(item: any) { return { id: String(item.fixture?.id ?? item.id), leagueId: item.league?.id ? Number(item.league.id) : null, league: item.league?.name || item.league_name || 'Football', country: item.league?.country || item.country || '', season: item.league?.season ? Number(item.league.season) : item.season ? Number(item.season) : null, homeId: item.teams?.home?.id ? Number(item.teams.home.id) : item.home_team_id ? Number(item.home_team_id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home', awayId: item.teams?.away?.id ? Number(item.teams.away.id) : item.away_team_id ? Number(item.away_team_id) : null, away: item.teams?.away?.name || item.away_team || item.away || 'Away', kickoff: item.fixture?.date || item.kickoff_at || new Date().toISOString(), status: String(item.fixture?.status?.short || item.status || 'NS'), homeScore: this.toNumber(item.goals?.home ?? item.home_score), awayScore: this.toNumber(item.goals?.away ?? item.away_score) }; }"
+          new = '''private normalizeFixture(item: any) {
+    const parse = (value: any): any => {
+      if (!value) return null;
+      if (typeof value === 'string') { try { return JSON.parse(value); } catch { return value; } }
+      return value;
+    };
+    const root = parse(item) || {};
+    const raw = parse(root.raw || root.raw_data || root.rawData) || {};
+    const text = (...values: any[]): string | null => {
+      for (const value of values) {
+        const v = typeof value === 'string' ? value.trim() : '';
+        if (v && !['home', 'away', 'team', 'home team', 'away team', 'tbd', 'unknown', 'n/a', 'null'].includes(v.toLowerCase())) return v;
+      }
+      return null;
+    };
+    const number = (...values: any[]): number | null => {
+      for (const value of values) { const n = Number(value); if (Number.isFinite(n)) return n; }
+      return null;
+    };
+    const home = text(root.teams?.home?.name, raw.teams?.home?.name, root.home_team, raw.home_team, root.homeTeam?.name, raw.homeTeam?.name, root.home_team_name, raw.home_team_name, root.homeTeamName, raw.homeTeamName, root.home, raw.home, root.event?.homeTeam?.name, raw.event?.homeTeam?.name);
+    const away = text(root.teams?.away?.name, raw.teams?.away?.name, root.away_team, raw.away_team, root.awayTeam?.name, raw.awayTeam?.name, root.away_team_name, raw.away_team_name, root.awayTeamName, raw.awayTeamName, root.away, raw.away, root.event?.awayTeam?.name, raw.event?.awayTeam?.name);
+    const league = text(root.league?.name, raw.league?.name, root.league_name, raw.league_name, root.leagueName, raw.leagueName, root.competition?.name, raw.competition?.name, root.competition_name, raw.competition_name, root.tournament?.name, raw.tournament?.name) || 'Football';
+    const id = text(root.fixture?.id, raw.fixture?.id, root.id, raw.id, root.fixture_id, raw.fixture_id, root.match_id, raw.match_id) || '';
+    const kickoff = text(root.fixture?.date, raw.fixture?.date, root.kickoff_at, raw.kickoff_at, root.kickoff, raw.kickoff, root.startTime, raw.startTime) || new Date().toISOString();
+    const status = text(root.fixture?.status?.short, raw.fixture?.status?.short, root.status, raw.status) || 'NS';
+    return { id, leagueId: number(root.league?.id, raw.league?.id, root.league_id, raw.league_id), league, country: text(root.league?.country, raw.league?.country, root.country, raw.country) || '', season: number(root.league?.season, raw.league?.season, root.season, raw.season), homeId: number(root.teams?.home?.id, raw.teams?.home?.id, root.home_team_id, raw.home_team_id), home: home || '', awayId: number(root.teams?.away?.id, raw.teams?.away?.id, root.away_team_id, raw.away_team_id), away: away || '', kickoff, status, homeScore: this.toNumber(root.goals?.home ?? raw.goals?.home ?? root.home_score ?? raw.home_score), awayScore: this.toNumber(root.goals?.away ?? raw.goals?.away ?? root.away_score ?? raw.away_score) };
+  }'''
+          if old not in s:
+              raise SystemExit('normalizeFixture target not found')
+          s = s.replace(old, new)
+          old_store = "private async storeFixture(fixture: any, cycleExpiresAt?: Date): Promise<void> {\n    const f = this.normalizeFixture(fixture);"
+          new_store = "private async storeFixture(fixture: any, cycleExpiresAt?: Date): Promise<void> {\n    const f = this.normalizeFixture(fixture);\n    if (!f.id || !f.home || !f.away) throw new Error(`Skipping fixture ${f.id || 'unknown'} because real team names were not found in the football provider payload.`);"
+          if old_store not in s:
+              raise SystemExit('storeFixture target not found')
+          s = s.replace(old_store, new_store)
+          p.write_text(s)
+          PY
+          grep -q "home: home || ''" backend/src/services/AiPredictionService.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/services/AiPredictionService.ts
+          git rm .github/fixture-fix-trigger .github/workflows/apply-fixture-metadata-fix.yml .github/workflows/apply-fixture-metadata-fix-v2.yml
+          git commit -m "fix: preserve real football team and league metadata"
+          git push
