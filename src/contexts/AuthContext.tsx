@@ -3,7 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const TOKEN_KEY = 'surebetpro_session';
 
-export interface User { id: string; email: string; name: string; role: string; plan: string; }
+export interface User { id: string; email: string; name: string; role: string; plan: string; subscriptionStatus: string; trialEndsAt: string; subscriptionExpiresAt: string | null; }
 interface AuthContextType { user: User | null; profile: User | null; isLoading: boolean; signOut: () => Promise<void>; refreshSession: () => Promise<void>; }
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
