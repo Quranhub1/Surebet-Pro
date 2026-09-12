@@ -45,6 +45,24 @@ app.get('/api/football/predictions', async (_req, res) => { try {
   const predictions = rows.map((row: any) => ({ id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team, startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: row.confidence == null ? null : Number(row.confidence), homeWin: row.home_win == null ? null : Number(row.home_win), draw: row.draw == null ? null : Number(row.draw), awayWin: row.away_win == null ? null : Number(row.away_win), underOver: row.under_over || null, predictedHomeGoals: row.predicted_home_goals == null ? null : Number(row.predicted_home_goals), predictedAwayGoals: row.predicted_away_goals == null ? null : Number(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null }));
   res.json({ ok: true, updatedAt: lastRunAt || new Date().toISOString(), count: predictions.length, predictions, analysisLastRunAt: lastRunAt, analysisLastRunStatus: settings?.[0]?.analysis_last_run_status ?? null, running: manualAnalysisRunning });
 } catch (error) { const message = error instanceof Error ? error.message : 'Match predictions failed'; console.error('[Football] AI prediction feed failed:', message); res.status(502).json({ ok: false, error: message, predictions: [] }); } });
+
+app.get('/api/football/history', async (req, res) => { try {
+  const requestedLimit = Number(req.query.limit || 200);
+  const limit = Math.min(Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.floor(requestedLimit) : 200, 500);
+  const rows = await sql`SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at, f.status, f.home_score, f.away_score, p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model FROM football_fixtures f JOIN football_ai_predictions p ON p.fixture_id = f.id WHERE f.status IN ('FINISHED','FT','AET','PEN') AND f.home_score IS NOT NULL AND f.away_score IS NOT NULL ORDER BY f.kickoff_at DESC LIMIT ${limit}`;
+  const history = rows.map((row: any) => {
+    const actualHome = row.home_score == null ? null : Number(row.home_score);
+    const actualAway = row.away_score == null ? null : Number(row.away_score);
+    const predictedHome = row.predicted_home_goals == null ? null : Number(row.predicted_home_goals);
+    const predictedAway = row.predicted_away_goals == null ? null : Number(row.predicted_away_goals);
+    const actualWinner = actualHome == null || actualAway == null ? null : actualHome > actualAway ? row.home_team : actualAway > actualHome ? row.away_team : 'Draw';
+    const predictionCorrect = row.winner && actualWinner ? row.winner === actualWinner : null;
+    const scoreCorrect = predictedHome != null && predictedAway != null && predictedHome === actualHome && predictedAway === actualAway;
+    return { id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team, kickoffAt: new Date(row.kickoff_at).toISOString(), status: row.status, predictedWinner: row.winner || null, predictedHomeGoals: predictedHome, predictedAwayGoals: predictedAway, confidence: row.confidence == null ? null : Number(row.confidence), actualHomeGoals: actualHome, actualAwayGoals: actualAway, actualResult: actualWinner, predictionCorrect, scoreCorrect, analysis: row.analysis || null, advice: row.advice || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], aiProvider: row.ai_provider || null, aiModel: row.ai_model || null };
+  });
+  res.json({ ok: true, count: history.length, history });
+} catch (error) { const message = error instanceof Error ? error.message : 'Analysis history failed'; console.error('[Football] Analysis history query failed:', message); res.status(500).json({ ok: false, error: message, history: [] }); } });
+
 app.get('/api/football/analysis-status', async (_req, res) => { try { const [rows] = await Promise.all([sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`]); res.json({ ok: true, running: manualAnalysisRunning, lastRunAt: rows?.[0]?.analysis_last_run_at ? new Date(rows[0].analysis_last_run_at).toISOString() : null, status: rows?.[0]?.analysis_last_run_status ?? null }); } catch (error) { res.status(503).json({ ok: false, running: manualAnalysisRunning, status: 'unknown' }); } });
 app.post('/api/football/analyze-now', async (_req, res) => { if (manualAnalysisRunning) return res.status(409).json({ ok: false, running: true, error: 'Football analysis is already running.' });
   manualAnalysisRunning = true;
