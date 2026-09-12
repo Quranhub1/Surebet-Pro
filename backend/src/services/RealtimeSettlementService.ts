@@ -127,6 +127,8 @@ class RealtimeSettlementService {
     const key = String(process.env.BSD_API_KEY || '').trim();
     if (!key) throw new Error('BSD_API_KEY is not configured.');
 
+    // API-Football and BSD can use different fixture IDs. Try the ID first,
+    // but never assume an API-Football ID is a BSD event ID.
     try {
       const response = await axios.get(`${BSD_BASE_URL}/events/${encodeURIComponent(row.fixture_id)}/`, {
         headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
@@ -140,6 +142,28 @@ class RealtimeSettlementService {
     }
 
     const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
+
+    // First ask BSD to narrow the archive by the home team name. BSD documents
+    // team_name as a fuzzy filter, which is much more reliable than scanning a
+    // date-wide catalogue when upstream providers use different team labels.
+    for (const teamName of [row.home_team, row.away_team]) {
+      try {
+        const response = await axios.get(`${BSD_BASE_URL}/events/`, {
+          params: { date_from: date, date_to: date, status: 'finished', team_name: teamName, limit: 200, offset: 0 },
+          headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
+          timeout: 20_000,
+        });
+        const candidates = Array.isArray(response.data?.results) ? response.data.results : [];
+        const match = candidates.find(event => this.isMatchingEvent(event, row));
+        if (match) {
+          console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD team_name search (${teamName}).`);
+          return match;
+        }
+      } catch (error) {
+        console.warn(`[History] BSD team search failed for ${teamName}:`, error instanceof Error ? error.message : error);
+      }
+    }
+
     const events = await this.getEventsForDate(date, key);
     const match = events.find(event => this.isMatchingEvent(event, row));
     if (!match) throw new Error(`BSD event not found for ${row.home_team} vs ${row.away_team} on ${date}`);
@@ -173,8 +197,13 @@ class RealtimeSettlementService {
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
-      .replace(/\b(football|fc|cf|sc|club|women|woman|w|u19|u20|u21|ii)\b/g, ' ')
+      .replace(/&/g, ' and ')
+      .replace(/\b(football|fc|cf|sc|club|women|woman|w|u19|u20|u21|u23|ii|reserves?)\b/g, ' ')
       .replace(/\b(2)\b/g, 'ii')
+      .replace(/\butd\b/g, 'united')
+      .replace(/\b(st)\b/g, 'saint')
+      .replace(/\b(dep)\b/g, 'deportivo')
+      .replace(/\b(atletico\s+de)\b/g, 'atletico')
       .replace(/[^a-z0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -185,11 +214,14 @@ class RealtimeSettlementService {
     const right = this.normalizeTeamName(b);
     if (!left || !right) return 0;
     if (left === right) return 1;
-    if (left.includes(right) || right.includes(left)) return 0.9;
+    if (left.includes(right) || right.includes(left)) return 0.94;
     const leftTokens = new Set(left.split(' '));
     const rightTokens = new Set(right.split(' '));
     const intersection = [...leftTokens].filter(token => rightTokens.has(token)).length;
-    return intersection / Math.max(leftTokens.size, rightTokens.size);
+    const union = new Set([...leftTokens, ...rightTokens]).size;
+    const jaccard = union ? intersection / union : 0;
+    const containment = intersection / Math.max(1, Math.min(leftTokens.size, rightTokens.size));
+    return Math.max(jaccard, containment * 0.9);
   }
 
   private extractTeamName(value: unknown): string | null {
@@ -213,8 +245,6 @@ class RealtimeSettlementService {
   }
 
   private isMatchingEvent(event: any, row: PendingMatch): boolean {
-    // BSD fixture IDs are the authoritative join key. Use them before fuzzy
-    // team matching because team naming varies considerably across competitions.
     const eventId = this.extractEventId(event);
     if (eventId && eventId === String(row.fixture_id)) return true;
 
@@ -224,12 +254,12 @@ class RealtimeSettlementService {
 
     const homeSimilarity = this.teamSimilarity(home, row.home_team);
     const awaySimilarity = this.teamSimilarity(away, row.away_team);
-    if (homeSimilarity < 0.6 || awaySimilarity < 0.6) return false;
+    if (homeSimilarity < 0.5 || awaySimilarity < 0.5) return false;
 
     const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time ?? event?.event?.kickoff_at ?? event?.event?.date;
     if (!eventKickoff) return true;
     const difference = Math.abs(new Date(eventKickoff).getTime() - new Date(row.kickoff_at).getTime());
-    return Number.isFinite(difference) && difference <= 6 * 60 * 60 * 1000;
+    return Number.isFinite(difference) && difference <= 12 * 60 * 60 * 1000;
   }
 
   private normalizeStatus(fixture: any): string {
