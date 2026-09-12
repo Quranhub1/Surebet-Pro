@@ -21,7 +21,7 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   if (isLoading) return <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0a]"><Loader2 className="h-8 w-8 animate-spin text-[#39FF14]" /></div>;
   if (!user) return <Navigate to="/auth" replace />;
   const role = String(user.role || '').toUpperCase();
-  if (!['ADMIN', 'SUPERADMIN', 'OWNER'].includes(role)) return <Navigate to="/" replace />;
+  if (role !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
