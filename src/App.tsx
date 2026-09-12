@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { History } from './pages/History';
 import { Performance } from './pages/Performance';
+import { Analytics } from './pages/Analytics';
 import { Auth } from './pages/Auth';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Loader2, Menu } from 'lucide-react';
@@ -24,7 +25,7 @@ function AppRoutes() {
     <Sidebar collapsed={sidebarCollapsed} mobileOpen={mobileMenuOpen} onToggleCollapsed={() => setSidebarCollapsed(value => !value)} onCloseMobile={() => setMobileMenuOpen(false)} />
     <main className="relative min-w-0 flex-1 overflow-y-auto">
       <div className="sticky top-0 z-30 flex h-14 items-center border-b border-[#222] bg-[#0a0a0a]/95 px-4 backdrop-blur md:hidden"><button onClick={() => setMobileMenuOpen(true)} aria-label="Open navigation" className="rounded-lg p-2 text-gray-300 hover:bg-[#1a1a1a] hover:text-white"><Menu className="h-6 w-6" /></button><span className="ml-3 text-lg font-extrabold tracking-tight">Surebet<span className="text-[#39FF14]">Pro</span></span></div>
-      <Routes><Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} /><Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} /><Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} /><Route path="*" element={<Navigate to="/" replace />} /></Routes>
+      <Routes><Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} /><Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} /><Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} /><Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} /><Route path="*" element={<Navigate to="/" replace />} /></Routes>
     </main>
   </div>;
 }
