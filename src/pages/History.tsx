@@ -1,0 +1,86 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { CalendarClock, CheckCircle2, History as HistoryIcon, Loader2, XCircle } from 'lucide-react';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+type HistoryRow = {
+  id: string;
+  league: string | null;
+  homeTeam: string;
+  awayTeam: string;
+  kickoffAt: string;
+  status: string;
+  predictedWinner: string | null;
+  predictedHomeGoals: number | null;
+  predictedAwayGoals: number | null;
+  confidence: number | null;
+  actualHomeGoals: number | null;
+  actualAwayGoals: number | null;
+  actualResult: string | null;
+  predictionCorrect: boolean | null;
+  scoreCorrect: boolean | null;
+  analysis: string | null;
+  advice: string | null;
+  keyFactors: string[];
+  aiProvider: string | null;
+  aiModel: string | null;
+};
+
+export function History() {
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadHistory = async () => {
+    try {
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/api/football/history?limit=200`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to load analysis history.');
+      setRows(Array.isArray(data.history) ? data.history : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load analysis history.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHistory();
+    const timer = window.setInterval(loadHistory, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const stats = useMemo(() => {
+    const evaluated = rows.filter(row => row.predictionCorrect !== null);
+    const correct = evaluated.filter(row => row.predictionCorrect).length;
+    const exact = rows.filter(row => row.scoreCorrect).length;
+    return { total: rows.length, evaluated: evaluated.length, correct, accuracy: evaluated.length ? Math.round((correct / evaluated.length) * 100) : null, exact };
+  }, [rows]);
+
+  return <div className="mx-auto w-full max-w-7xl p-5 md:p-8 pb-16">
+    <div className="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#39FF14]/10 text-[#39FF14]"><HistoryIcon className="h-6 w-6" /></div><h1 className="text-3xl font-extrabold text-white">Analysis History</h1></div>
+        <p className="mt-2 text-sm text-gray-400">Saved AI predictions compared with the actual completed match results.</p>
+      </div>
+      <button onClick={loadHistory} className="rounded-xl border border-[#333] bg-[#171717] px-4 py-2 text-sm font-bold text-gray-200 hover:bg-[#222]">Refresh</button>
+    </div>
+
+    <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
+      {[['Saved games', stats.total], ['Evaluated', stats.evaluated], ['Accuracy', stats.accuracy === null ? '—' : `${stats.accuracy}%`], ['Exact score', stats.exact]].map(([label, value]) => <div key={String(label)} className="rounded-2xl border border-[#292929] bg-[#111] p-5"><div className="text-xs font-bold uppercase tracking-wider text-gray-500">{label}</div><div className="mt-2 text-2xl font-black text-white">{value}</div></div>)}
+    </div>
+
+    {loading ? <div className="flex min-h-64 items-center justify-center"><Loader2 className="h-9 w-9 animate-spin text-[#39FF14]" /></div> : error ? <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-red-300">{error}</div> : rows.length === 0 ? <div className="rounded-2xl border border-[#292929] bg-[#111] p-10 text-center"><CalendarClock className="mx-auto h-10 w-10 text-gray-600" /><h2 className="mt-4 text-lg font-bold text-white">No completed predictions yet</h2><p className="mt-2 text-sm text-gray-500">Completed fixtures and their original predictions will appear here automatically.</p></div> : <div className="space-y-4">{rows.map(row => <article key={row.id} className="overflow-hidden rounded-2xl border border-[#292929] bg-[#111]">
+      <div className="flex flex-col gap-4 border-b border-[#242424] p-5 md:flex-row md:items-center md:justify-between">
+        <div><div className="text-xs font-bold uppercase tracking-wider text-[#39FF14]">{row.league || 'Football'}</div><h2 className="mt-1 text-lg font-extrabold text-white">{row.homeTeam} <span className="text-gray-600">vs</span> {row.awayTeam}</h2><div className="mt-1 text-xs text-gray-500">{new Date(row.kickoffAt).toLocaleString()} · {row.status}</div></div>
+        <div className="flex items-center gap-3">{row.predictionCorrect === true ? <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Prediction correct</span> : row.predictionCorrect === false ? <span className="flex items-center gap-1 rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-400"><XCircle className="h-4 w-4" /> Prediction missed</span> : <span className="rounded-full bg-gray-500/10 px-3 py-1 text-xs font-bold text-gray-400">Awaiting result</span>}</div>
+      </div>
+      <div className="grid gap-4 p-5 md:grid-cols-3">
+        <div className="rounded-xl border border-[#292929] bg-[#151515] p-4"><div className="text-xs font-bold uppercase text-gray-500">AI prediction</div><div className="mt-2 text-sm font-bold text-white">Winner: {row.predictedWinner || 'Not specified'}</div><div className="mt-1 text-sm text-gray-300">Score: {row.predictedHomeGoals ?? '—'} - {row.predictedAwayGoals ?? '—'}</div><div className="mt-1 text-xs text-gray-500">Confidence: {row.confidence == null ? '—' : `${row.confidence}%`}</div></div>
+        <div className="rounded-xl border border-[#292929] bg-[#151515] p-4"><div className="text-xs font-bold uppercase text-gray-500">Actual result</div><div className="mt-2 text-sm font-bold text-white">Result: {row.actualResult || '—'}</div><div className="mt-1 text-sm text-gray-300">Score: {row.actualHomeGoals ?? '—'} - {row.actualAwayGoals ?? '—'}</div><div className="mt-1 text-xs text-gray-500">{row.scoreCorrect ? 'Exact score matched' : 'Score did not match exactly'}</div></div>
+        <div className="rounded-xl border border-[#292929] bg-[#151515] p-4"><div className="text-xs font-bold uppercase text-gray-500">Analysis</div><p className="mt-2 text-sm leading-6 text-gray-300">{row.analysis || row.advice || 'No written analysis saved.'}</p>{row.aiProvider && <div className="mt-2 text-xs text-gray-500">{row.aiProvider} · {row.aiModel || 'default model'}</div>}</div>
+      </div>
+    </article>)}</div>}
+  </div>;
+}
