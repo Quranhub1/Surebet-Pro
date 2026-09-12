@@ -358,9 +358,14 @@ export class AiPredictionService {
 
   private async storeFixture(fixture: any, cycleExpiresAt?: Date): Promise<void> {
     const f = this.normalizeFixture(fixture);
+    const rawStr = JSON.stringify(fixture);
+    const homeFromRaw = (() => { try { const r = typeof fixture === 'string' ? JSON.parse(fixture) : fixture; return r?.teams?.home?.name || r?.home_team || r?.home || null; } catch { return null; } })();
+    const awayFromRaw = (() => { try { const r = typeof fixture === 'string' ? JSON.parse(fixture) : fixture; return r?.teams?.away?.name || r?.away_team || r?.away || null; } catch { return null; } })();
+    const leagueFromRaw = (() => { try { const r = typeof fixture === 'string' ? JSON.parse(fixture) : fixture; return r?.league?.name || r?.league_name || r?.competition || null; } catch { return null; } })();
+    const isPlaceholder = (v: string) => !v || ['Home','Away','Football','Unknown league','home','away'].includes(v);
     await sql`
       INSERT INTO football_fixtures (id, league_id, league_name, country, season, home_team_id, home_team, away_team_id, away_team, kickoff_at, status, home_score, away_score, raw_data, analysis_expires_at, updated_at)
-      VALUES (${f.id}, ${f.leagueId}, ${f.league}, ${f.country}, ${f.season}, ${f.homeId}, ${f.home}, ${f.awayId}, ${f.away}, ${f.kickoff}, ${f.status}, ${f.homeScore}, ${f.awayScore}, ${JSON.stringify(fixture)}, ${cycleExpiresAt?.toISOString() || null}, NOW())
+      VALUES (${f.id}, ${f.leagueId}, ${isPlaceholder(f.league) ? (leagueFromRaw || f.league) : f.league}, ${f.country}, ${f.season}, ${f.homeId}, ${isPlaceholder(f.home) ? (homeFromRaw || f.home) : f.home}, ${f.awayId}, ${isPlaceholder(f.away) ? (awayFromRaw || f.away) : f.away}, ${f.kickoff}, ${f.status}, ${f.homeScore}, ${f.awayScore}, ${rawStr}, ${cycleExpiresAt?.toISOString() || null}, NOW())
       ON CONFLICT (id) DO UPDATE SET league_id=EXCLUDED.league_id, league_name=EXCLUDED.league_name, country=EXCLUDED.country, season=EXCLUDED.season,
         home_team_id=EXCLUDED.home_team_id, home_team=EXCLUDED.home_team, away_team_id=EXCLUDED.away_team_id, away_team=EXCLUDED.away_team,
         kickoff_at=EXCLUDED.kickoff_at, status=EXCLUDED.status, home_score=EXCLUDED.home_score, away_score=EXCLUDED.away_score,
