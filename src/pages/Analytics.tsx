@@ -1,49 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, Brain, Database, History, RefreshCw, ShieldCheck, Target } from 'lucide-react';
 
-const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('surebet_token') || ''}` });
+const headers = () => ({ Authorization: `Bearer ${localStorage.getItem('surebet_token') || ''}` });
+const settled = (items: any[]) => items.filter(item => item.predictionResult === 'true' || item.predictionResult === 'lose');
+const accuracy = (items: any[]) => { const x = settled(items); return x.length ? Math.round(100 * x.filter(i => i.predictionResult === 'true').length / x.length) : 0; };
 
 export function Analytics() {
-  const [data, setData] = useState<any>(null);
-  const [health, setHealth] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [from, setFrom] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
-
-  async function load() {
-    setLoading(true);
-    const headers = authHeaders();
-    const [analytics, system] = await Promise.all([
-      fetch(`/api/football/analytics?from=${from}&to=${to}`, { headers, cache: 'no-store' }),
-      fetch('/api/system/health', { headers, cache: 'no-store' }),
-    ]);
-    if (analytics.ok) setData(await analytics.json());
-    if (system.ok) setHealth(await system.json());
-    setLoading(false);
-  }
-
+  const [items, setItems] = useState<any[]>([]); const [health, setHealth] = useState<any>(null); const [loading, setLoading] = useState(true);
+  const [from, setFrom] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)); const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+  async function load() { setLoading(true); const h = headers(); const [history, status] = await Promise.all([fetch(`/api/football/history?from=${from}&to=${to}`, { headers: h, cache: 'no-store' }), fetch('/api/health', { cache: 'no-store' })]); if (history.ok) { const body = await history.json(); setItems(body.items || []); } if (status.ok) setHealth(await status.json()); setLoading(false); }
   useEffect(() => { void load(); }, [from, to]);
-
-  const lessons = useMemo(() => (data?.calibration || [])
-    .filter((band: any) => band.total >= 3 && band.correct / band.total < 0.5)
-    .map((band: any) => `The ${band.band}% confidence band is underperforming at ${Math.round(100 * band.correct / band.total)}%. Treat this band as overconfident.`), [data]);
-
+  const done = settled(items); const correct = done.filter(i => i.predictionResult === 'true').length;
+  const providers = useMemo(() => ['gemini', 'groq'].map(provider => { const x = done.filter(i => i.aiProvider === provider); return { provider, total: x.length, correct: x.filter(i => i.predictionResult === 'true').length, confidence: x.length ? x.reduce((s, i) => s + (i.confidence || 0), 0) / x.length : 0 }; }), [items]);
+  const calibration = useMemo(() => ['0-59','60-69','70-79','80-89','90-100'].map(band => { const [lo, hi] = band === '90-100' ? [90,100] : band.split('-').map(Number); const x = done.filter(i => (i.confidence || 0) >= lo && (i.confidence || 0) <= hi); return { band, total: x.length, correct: x.filter(i => i.predictionResult === 'true').length }; }), [items]);
+  const categories = useMemo(() => ['home','draw','away'].map(category => { const x = done.filter(i => category === 'draw' ? i.winner === 'draw' : category === 'home' ? i.winner === i.homeTeam : i.winner === i.awayTeam); return { category, total: x.length, correct: x.filter(i => i.predictionResult === 'true').length }; }), [items]);
+  const teams = useMemo(() => { const map = new Map<string, any>(); for (const i of done) { for (const team of [i.homeTeam, i.awayTeam]) { const actualHome = i.actualHomeScore; const actualAway = i.actualAwayScore; if (actualHome == null || actualAway == null) continue; const home = team === i.homeTeam; const gf = home ? actualHome : actualAway; const ga = home ? actualAway : actualHome; const row = map.get(team) || { team, games: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0 }; row.games++; row.gf += gf; row.ga += ga; if (gf > ga) row.wins++; else if (gf === ga) row.draws++; else row.losses++; map.set(team, row); } } return [...map.values()].sort((a,b)=>b.games-a.games).slice(0,20); }, [items]);
+  const lessons = calibration.filter(b => b.total >= 3 && b.correct / b.total < 0.5);
   return <div className="space-y-6 p-5 md:p-8">
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className="text-xs font-semibold uppercase tracking-widest text-[#39FF14]">Prediction intelligence</p><h1 className="text-3xl font-bold text-white">Analytics & audit</h1><p className="mt-1 text-sm text-slate-400">Calibration, provider performance, prediction changes and system health.</p></div>
-      <div className="flex gap-2"><input type="date" value={from} onChange={e => setFrom(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" /><input type="date" value={to} onChange={e => setTo(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" /><button onClick={() => void load()} className="rounded-lg border border-slate-700 p-2 text-slate-300"><RefreshCw size={17} /></button></div>
-    </div>
-    {loading && !data ? <div className="text-slate-400">Loading analytics...</div> : <>
-      <div className="grid gap-4 md:grid-cols-4">{[[Target, 'Settled', (data?.overall?.correct || 0) + (data?.overall?.failed || 0)], [Brain, 'Accuracy', `${Math.round(100 * (data?.overall?.correct || 0) / Math.max(1, (data?.overall?.correct || 0) + (data?.overall?.failed || 0)))}%`], [Activity, 'Prediction changes', data?.audit?.prediction_changes || 0], [Database, 'Pending settlement', health?.pendingSettlement || 0]].map(([Icon, label, value]: any) => <div className="rounded-xl border border-slate-800 bg-slate-900 p-4" key={label}><Icon size={18} className="text-[#39FF14]" /><div className="mt-3 text-xs text-slate-500">{label}</div><div className="text-2xl font-bold text-white">{value}</div></div>)}</div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 font-semibold text-white">Provider leaderboard</h2>{(data?.providers || []).map((provider: any) => <div className="mb-3 flex items-center justify-between rounded-lg bg-slate-950 p-3" key={provider.provider}><div><div className="font-medium text-white">{provider.provider || 'unknown'}</div><div className="text-xs text-slate-500">{provider.total} predictions · average confidence {Number(provider.avg_confidence || 0).toFixed(1)}%</div></div><div className="text-lg font-bold text-[#39FF14]">{Math.round(100 * provider.correct / Math.max(1, provider.correct + provider.failed))}%</div></div>)}</section>
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 font-semibold text-white">Confidence calibration</h2>{(data?.calibration || []).map((band: any) => <div className="mb-3" key={band.band}><div className="mb-1 flex justify-between text-xs text-slate-400"><span>{band.band}%</span><span>{band.correct}/{band.total} correct</span></div><div className="h-2 overflow-hidden rounded bg-slate-800"><div className="h-full rounded bg-[#39FF14]" style={{ width: `${100 * band.correct / Math.max(1, band.total)}%` }} /></div></div>)}</section>
-      </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 flex items-center gap-2 font-semibold text-white"><ShieldCheck size={17} /> AI feedback loop</h2>{lessons.length ? lessons.map((lesson: string) => <div className="mb-2 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200" key={lesson}>{lesson}</div>) : <div className="text-sm text-slate-400">No statistically meaningful calibration warnings in this range.</div>}</section>
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 flex items-center gap-2 font-semibold text-white"><History size={17} /> Audit trail</h2><div className="text-sm text-slate-400">{data?.audit?.audit_events || 0} audit events recorded. Prediction changes are preserved for post-match review.</div><div className="mt-4 text-sm text-slate-300">Analysis: {health?.lastAnalysis?.analysis_last_run_status || 'unknown'} · audit events in 24h: {health?.auditEvents24h || 0}</div></section>
-      </div>
-      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 font-semibold text-white">Team intelligence</h2><div className="grid gap-2 md:grid-cols-2">{(data?.teams || []).slice(0, 20).map((team: any) => <div className="flex items-center justify-between rounded-lg bg-slate-950 p-3" key={team.team}><span className="text-sm text-white">{team.team}</span><span className="text-xs text-slate-400">{team.wins}-{team.draws}-{team.losses} · {team.goals_for}:{team.goals_against}</span></div>)}</div></section>
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-widest text-[#39FF14]">Prediction intelligence</p><h1 className="text-3xl font-bold text-white">Analytics & audit</h1><p className="mt-1 text-sm text-slate-400">Calibration, provider performance, categories and team intelligence.</p></div><div className="flex gap-2"><input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"/><input type="date" value={to} onChange={e=>setTo(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"/><button onClick={()=>void load()} className="rounded-lg border border-slate-700 p-2 text-slate-300"><RefreshCw size={17}/></button></div></div>
+    {loading&&!items.length ? <div className="text-slate-400">Loading analytics...</div> : <>
+      <div className="grid gap-4 md:grid-cols-4">{[[Target,'Settled',done.length],[Brain,'Accuracy',`${accuracy(items)}%`],[Activity,'Predictions',items.length],[Database,'Database',health?.database?'Online':'Unknown']].map(([Icon,label,value]:any)=><div className="rounded-xl border border-slate-800 bg-slate-900 p-4" key={label}><Icon size={18} className="text-[#39FF14]"/><div className="mt-3 text-xs text-slate-500">{label}</div><div className="text-2xl font-bold text-white">{value}</div></div>)}</div>
+      <div className="grid gap-6 lg:grid-cols-2"><section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 font-semibold text-white">Provider leaderboard</h2>{providers.map(p=><div className="mb-3 flex items-center justify-between rounded-lg bg-slate-950 p-3" key={p.provider}><div><div className="font-medium capitalize text-white">{p.provider}</div><div className="text-xs text-slate-500">{p.total} settled · average confidence {p.confidence.toFixed(1)}%</div></div><div className="text-lg font-bold text-[#39FF14]">{p.total?Math.round(100*p.correct/p.total):0}%</div></div>)}</section>
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 font-semibold text-white">Confidence calibration</h2>{calibration.map(b=><div className="mb-3" key={b.band}><div className="mb-1 flex justify-between text-xs text-slate-400"><span>{b.band}%</span><span>{b.correct}/{b.total} correct</span></div><div className="h-2 overflow-hidden rounded bg-slate-800"><div className="h-full rounded bg-[#39FF14]" style={{width:`${100*b.correct/Math.max(1,b.total)}%`}}/></div></div>)}</section></div>
+      <div className="grid gap-6 lg:grid-cols-2"><section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 flex items-center gap-2 font-semibold text-white"><ShieldCheck size={17}/> AI feedback loop</h2>{lessons.length?lessons.map(b=><div className="mb-2 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200" key={b.band}>The {b.band}% confidence band is overconfident at {Math.round(100*b.correct/b.total)}% accuracy.</div>):<div className="text-sm text-slate-400">No meaningful calibration warning in this range.</div>}</section>
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 flex items-center gap-2 font-semibold text-white"><History size={17}/> Prediction categories</h2>{categories.map(c=><div className="mb-2 flex justify-between rounded-lg bg-slate-950 p-3 text-sm" key={c.category}><span className="capitalize text-white">{c.category}</span><span className="text-slate-400">{c.correct}/{c.total} correct · {c.total?Math.round(100*c.correct/c.total):0}%</span></div>)}</section></div>
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-4 font-semibold text-white">Team intelligence</h2><div className="grid gap-2 md:grid-cols-2">{teams.map(t=><div className="flex items-center justify-between rounded-lg bg-slate-950 p-3" key={t.team}><span className="text-sm text-white">{t.team}</span><span className="text-xs text-slate-400">{t.wins}-{t.draws}-{t.losses} · {t.gf}:{t.ga}</span></div>)}</div></section>
+      <div className="text-xs text-slate-500">History is settled against recorded final scores. Database: {health?.databaseProvider || 'Neon PostgreSQL'}.</div>
     </>}
   </div>;
 }
