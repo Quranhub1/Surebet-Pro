@@ -4,7 +4,62 @@ import { randomUUID } from 'node:crypto';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required for Neon PostgreSQL.');
-export const sql = neon(databaseUrl);
+
+const rawSql = neon(databaseUrl);
+
+/**
+ * Neon uses HTTP/fetch under the hood. A transient socket/DNS/platform failure
+ * must not kill the entire football analysis cycle. Retry only failures that
+ * look transient, with bounded exponential backoff and jitter.
+ */
+const DB_RETRY_ATTEMPTS = 4;
+const DB_RETRY_BASE_MS = 750;
+
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = String((error as any)?.code || '').toUpperCase();
+  return (
+    message.includes('fetch failed') ||
+    message.includes('ECONNRESET') ||
+    message.includes('ETIMEDOUT') ||
+    message.includes('ECONNREFUSED') ||
+    message.includes('EAI_AGAIN') ||
+    message.includes('socket hang up') ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    code === 'EAI_AGAIN'
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= DB_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDatabaseError(error) || attempt >= DB_RETRY_ATTEMPTS) throw error;
+      const jitter = Math.floor(Math.random() * 250);
+      const delay = DB_RETRY_BASE_MS * 2 ** (attempt - 1) + jitter;
+      console.warn(`[DB] Transient database failure; retrying in ${delay}ms (attempt ${attempt}/${DB_RETRY_ATTEMPTS - 1}).`);
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+// Preserve Neon tagged-template behaviour while transparently retrying calls.
+// This covers every SQL query in the application, including future modules.
+export const sql = new Proxy(rawSql as any, {
+  apply(target, thisArg, args) {
+    return executeWithRetry(() => Reflect.apply(target, thisArg, args));
+  },
+}) as typeof rawSql;
 
 export async function acquireAnalysisLock(): Promise<boolean> {
   const rows = await sql`
