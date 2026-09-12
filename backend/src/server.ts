@@ -6,8 +6,10 @@ import { oddsApiService } from './services/OddsApiService';
 import { aiPredictionService } from './services/AiPredictionService';
 import { getUser, login, register, createSession, verifySession } from './services/AuthService';
 import { acquireAnalysisLock, releaseAnalysisLock, newId, sql } from './lib/db';
+import { subscriptionRouter } from './services/SubscriptionGateway';
 
 const app = express(); app.use(cors()); app.use(express.json());
+app.use(subscriptionRouter);
 const ANALYSIS_INTERVAL_MS = 12 * 60 * 60 * 1000;
 let manualAnalysisRunning = false;
 function authUserId(req: express.Request): string | null { const header = req.headers.authorization || ''; return header.startsWith('Bearer ') ? verifySession(header.slice(7)) : null; }
