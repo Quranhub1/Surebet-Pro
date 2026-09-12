@@ -179,7 +179,7 @@ export class AiPredictionService {
     return { items, summary: { total, correct, failed, pending, accuracy: correct + failed ? Number(((correct / (correct + failed)) * 100).toFixed(1)) : 0 } };
   }
 
-  private async settleCompletedPredictions(): Promise<void> {
+  public async settleCompletedPredictions(): Promise<void> {
     const pending = await sql`
       SELECT p.fixture_id, p.winner, f.home_team, f.away_team, f.kickoff_at
       FROM football_ai_predictions p
@@ -389,89 +389,32 @@ export class AiPredictionService {
     const winner = this.stringOrNull(item.winner);
     const allowedWinner = winner === fixture.home || winner === fixture.away || winner === 'draw' ? winner : null;
     return {
-      id: fixture.id,
-      league: fixture.league,
-      homeTeam: fixture.home,
-      awayTeam: fixture.away,
-      startTime: fixture.kickoff,
-      winner: allowedWinner,
-      advice: this.stringOrNull(item.advice),
-      analysis: this.stringOrNull(item.analysis),
+      id: fixture.id, league: fixture.league, homeTeam: fixture.home, awayTeam: fixture.away, startTime: fixture.kickoff,
+      winner: allowedWinner, advice: this.stringOrNull(item.advice), analysis: this.stringOrNull(item.analysis),
       keyFactors: Array.isArray(item.keyFactors) ? item.keyFactors.filter((value: unknown): value is string => typeof value === 'string').slice(0, 5) : [],
-      confidence: this.toNumber(item.confidence),
-      homeWin: this.toNumber(item.homeWin),
-      draw: this.toNumber(item.draw),
-      awayWin: this.toNumber(item.awayWin),
-      underOver: this.stringOrNull(item.underOver),
-      predictedHomeGoals: this.toNumber(item.predictedHomeGoals),
-      predictedAwayGoals: this.toNumber(item.predictedAwayGoals),
-      aiProvider: provider,
-      aiModel: provider === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b'),
+      confidence: this.toNumber(item.confidence), homeWin: this.toNumber(item.homeWin), draw: this.toNumber(item.draw), awayWin: this.toNumber(item.awayWin),
+      underOver: this.stringOrNull(item.underOver), predictedHomeGoals: this.toNumber(item.predictedHomeGoals), predictedAwayGoals: this.toNumber(item.predictedAwayGoals),
+      aiProvider: provider, aiModel: provider === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite') : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b'),
     };
   }
 
   private mapRow(row: any): AiMatchPrediction {
-    return {
-      id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team,
-      startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null,
-      analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [],
-      confidence: this.toNumber(row.confidence), homeWin: this.toNumber(row.home_win), draw: this.toNumber(row.draw), awayWin: this.toNumber(row.away_win),
-      underOver: row.under_over || null, predictedHomeGoals: this.toNumber(row.predicted_home_goals), predictedAwayGoals: this.toNumber(row.predicted_away_goals),
-      aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null,
-    };
+    return { id: String(row.id), league: row.league_name, homeTeam: row.home_team, awayTeam: row.away_team, startTime: new Date(row.kickoff_at).toISOString(), winner: row.winner || null, advice: row.advice || null, analysis: row.analysis || null, keyFactors: Array.isArray(row.key_factors) ? row.key_factors : [], confidence: this.toNumber(row.confidence), homeWin: this.toNumber(row.home_win), draw: this.toNumber(row.draw), awayWin: this.toNumber(row.away_win), underOver: row.under_over || null, predictedHomeGoals: this.toNumber(row.predicted_home_goals), predictedAwayGoals: this.toNumber(row.predicted_away_goals), aiProvider: row.ai_provider === 'gemini' || row.ai_provider === 'groq' ? row.ai_provider : null, aiModel: row.ai_model || null };
   }
 
   private mapHistoryRow(row: any): PredictionHistoryItem {
-    return {
-      ...this.mapRow(row),
-      actualHomeScore: row.actual_home_score == null ? null : Number(row.actual_home_score),
-      actualAwayScore: row.actual_away_score == null ? null : Number(row.actual_away_score),
-      predictionResult: row.prediction_result === 'true' || row.prediction_result === 'lose' || row.prediction_result === 'pending' ? row.prediction_result : null,
-      settledAt: row.settled_at ? new Date(row.settled_at).toISOString() : null,
-    };
+    return { ...this.mapRow(row), actualHomeScore: row.actual_home_score == null ? null : Number(row.actual_home_score), actualAwayScore: row.actual_away_score == null ? null : Number(row.actual_away_score), predictionResult: row.prediction_result === 'true' || row.prediction_result === 'lose' || row.prediction_result === 'pending' ? row.prediction_result : null, settledAt: row.settled_at ? new Date(row.settled_at).toISOString() : null };
   }
 
   private rowToFixture(row: any): any {
-    return {
-      id: String(row.id), league: row.league_name, home: row.home_team, away: row.away_team,
-      kickoff: new Date(row.kickoff_at).toISOString(), status: row.status,
-      raw: row.raw_data || {
-        fixture: { id: row.id, date: row.kickoff_at, status: { short: row.status } },
-        league: { id: row.league_id, name: row.league_name, country: row.country, season: row.season },
-        teams: { home: { id: row.home_team_id, name: row.home_team }, away: { id: row.away_team_id, name: row.away_team } },
-        goals: { home: row.home_score, away: row.away_score },
-      },
-    };
+    return { id: String(row.id), league: row.league_name, home: row.home_team, away: row.away_team, kickoff: new Date(row.kickoff_at).toISOString(), status: row.status, raw: row.raw_data || { fixture: { id: row.id, date: row.kickoff_at, status: { short: row.status } }, league: { id: row.league_id, name: row.league_name, country: row.country, season: row.season }, teams: { home: { id: row.home_team_id, name: row.home_team }, away: { id: row.away_team_id, name: row.away_team } }, goals: { home: row.home_score, away: row.away_score } } };
   }
 
-  private compactObject(value: any): any {
-    if (!value || typeof value !== 'object') return {};
-    const output: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value).slice(0, 10)) output[key] = entry;
-    return output;
-  }
-
-  private parseJson(raw: string): any {
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    try { return JSON.parse(cleaned); } catch {
-      const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}');
-      if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
-      throw new Error('AI returned invalid football analysis JSON');
-    }
-  }
-
+  private compactObject(value: any): any { if (!value || typeof value !== 'object') return {}; const output: Record<string, unknown> = {}; for (const [key, entry] of Object.entries(value).slice(0, 10)) output[key] = entry; return output; }
+  private parseJson(raw: string): any { const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim(); try { return JSON.parse(cleaned); } catch { const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}'); if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)); throw new Error('AI returned invalid football analysis JSON'); } }
   private stringOrNull(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null; }
   private toNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(String(value).replace('%', '').trim()); return Number.isFinite(n) ? n : null; }
-  private normalizeFixture(item: any) {
-    return {
-      id: String(item.fixture?.id ?? item.id), leagueId: item.league?.id ? Number(item.league.id) : null,
-      league: item.league?.name || item.league_name || 'Football', country: item.league?.country || item.country || '', season: item.league?.season ? Number(item.league.season) : item.season ? Number(item.season) : null,
-      homeId: item.teams?.home?.id ? Number(item.teams.home.id) : item.home_team_id ? Number(item.home_team_id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home',
-      awayId: item.teams?.away?.id ? Number(item.teams.away.id) : item.away_team_id ? Number(item.away_team_id) : null, away: item.teams?.away?.name || item.away_team || item.away || 'Away',
-      kickoff: item.fixture?.date || item.kickoff_at || new Date().toISOString(), status: String(item.fixture?.status?.short || item.status || 'NS'),
-      homeScore: this.toNumber(item.goals?.home ?? item.home_score), awayScore: this.toNumber(item.goals?.away ?? item.away_score),
-    };
-  }
+  private normalizeFixture(item: any) { return { id: String(item.fixture?.id ?? item.id), leagueId: item.league?.id ? Number(item.league.id) : null, league: item.league?.name || item.league_name || 'Football', country: item.league?.country || item.country || '', season: item.league?.season ? Number(item.league.season) : item.season ? Number(item.season) : null, homeId: item.teams?.home?.id ? Number(item.teams.home.id) : item.home_team_id ? Number(item.home_team_id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home', awayId: item.teams?.away?.id ? Number(item.teams.away.id) : item.away_team_id ? Number(item.away_team_id) : null, away: item.teams?.away?.name || item.away_team || item.away || 'Away', kickoff: item.fixture?.date || item.kickoff_at || new Date().toISOString(), status: String(item.fixture?.status?.short || item.status || 'NS'), homeScore: this.toNumber(item.goals?.home ?? item.home_score), awayScore: this.toNumber(item.goals?.away ?? item.away_score) }; }
   private formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
 }
 
