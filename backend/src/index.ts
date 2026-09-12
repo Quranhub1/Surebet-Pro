@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { ensureDatabase } from './lib/db';
 import { ensurePredictionIntegrity } from './services/PredictionIntegrityService';
 import { ensurePredictionAnalytics } from './services/PredictionAnalyticsService';
-import { ensureUserSubscriptionColumns, installSubscriptionGateway } from './services/SubscriptionGateway';
+import { ensureUserSubscriptionColumns } from './services/SubscriptionGateway';
 import { scannerScheduler } from './engine/ScannerScheduler';
 
 dotenv.config();
@@ -163,7 +163,6 @@ async function start(): Promise<void> {
   await ensurePredictionIntegrity();
   await ensurePredictionAnalytics();
   await ensureUserSubscriptionColumns();
-  installSubscriptionGateway();
   console.log('[DB] Connected to Neon PostgreSQL and prediction integrity, analytics audit guards, subscription gateway enabled.');
   const { startServer } = await import('./server');
   await startServer();
