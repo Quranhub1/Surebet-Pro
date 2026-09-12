@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, BarChart3, History, LogOut, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Activity, BarChart3, History, LogOut, X, PanelLeftClose, PanelLeftOpen, Brain } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -8,6 +8,7 @@ const navItems = [
   { icon: Activity, label: 'Game Analysis', path: '/' },
   { icon: History, label: 'History', path: '/history' },
   { icon: BarChart3, label: 'AI Performance', path: '/performance' },
+  { icon: Brain, label: 'Analytics & Audit', path: '/analytics' },
 ];
 
 interface SidebarProps { collapsed: boolean; mobileOpen: boolean; onToggleCollapsed: () => void; onCloseMobile: () => void; }
