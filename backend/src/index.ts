@@ -1,6 +1,7 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { ensureDatabase } from './lib/db';
+import { ensurePredictionIntegrity } from './services/PredictionIntegrityService';
 import { scannerScheduler } from './engine/ScannerScheduler';
 import { startServer } from './server';
 
@@ -16,62 +17,29 @@ dotenv.config();
 const originalAxiosGet = axios.get.bind(axios);
 axios.get = async function resilientFootballGet(url: string, config: any = {}) {
   const params = config?.params as Record<string, string | number> | undefined;
-  const isFixtureRangeRequest =
-    url.includes('/fixtures') &&
-    params &&
-    typeof params.from === 'string' &&
-    typeof params.to === 'string';
-
+  const isFixtureRangeRequest = url.includes('/fixtures') && params && typeof params.from === 'string' && typeof params.to === 'string';
   if (!isFixtureRangeRequest) return originalAxiosGet(url, config);
-
   const response = await originalAxiosGet(url, config);
   const errors = response.data?.errors;
   const errorText = Array.isArray(errors) ? errors.join('; ') : errors && typeof errors === 'object' ? Object.values(errors).join('; ') : '';
-  const needsDailyFallback = /From field|To field/i.test(errorText);
-
-  if (!needsDailyFallback) return response;
-
-  const from = new Date(`${params.from}T00:00:00Z`);
-  const to = new Date(`${params.to}T00:00:00Z`);
+  if (!/From field|To field/i.test(errorText)) return response;
+  const from = new Date(`${params.from}T00:00:00Z`); const to = new Date(`${params.to}T00:00:00Z`);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) return response;
-
   console.warn(`[AI] API-Football rejected from/to range (${params.from} -> ${params.to}); falling back to daily fixture requests.`);
-
   const fixtures: any[] = [];
   for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-    const date = cursor.toISOString().slice(0, 10);
-    const dailyParams = { ...params };
-    delete dailyParams.from;
-    delete dailyParams.to;
-    dailyParams.date = date;
+    const date = cursor.toISOString().slice(0, 10); const dailyParams = { ...params }; delete dailyParams.from; delete dailyParams.to; dailyParams.date = date;
     try {
       const dailyResponse = await originalAxiosGet(url, { ...config, params: dailyParams });
       const dailyErrors = dailyResponse.data?.errors;
-      if (dailyErrors && ((Array.isArray(dailyErrors) && dailyErrors.length) || Object.keys(dailyErrors).length)) {
-        const message = Array.isArray(dailyErrors) ? dailyErrors.join('; ') : Object.values(dailyErrors).join('; ');
-        console.warn(`[AI] Daily fixture request ${date} failed: ${message}`);
-        continue;
-      }
+      if (dailyErrors && ((Array.isArray(dailyErrors) && dailyErrors.length) || Object.keys(dailyErrors).length)) { const message = Array.isArray(dailyErrors) ? dailyErrors.join('; ') : Object.values(dailyErrors).join('; '); console.warn(`[AI] Daily fixture request ${date} failed: ${message}`); continue; }
       if (Array.isArray(dailyResponse.data?.response)) fixtures.push(...dailyResponse.data.response);
-    } catch (error) {
-      console.warn(`[AI] Daily fixture request ${date} failed:`, error instanceof Error ? error.message : error);
-    }
+    } catch (error) { console.warn(`[AI] Daily fixture request ${date} failed:`, error instanceof Error ? error.message : error); }
     await new Promise(resolve => setTimeout(resolve, 1200));
   }
-
   const uniqueFixtures = Array.from(new Map(fixtures.map(fixture => [String(fixture?.fixture?.id), fixture])).values());
   console.log(`[AI] Daily fallback recovered ${uniqueFixtures.length} fixtures for ${params.from} through ${params.to}.`);
-
-  return {
-    ...response,
-    data: {
-      ...response.data,
-      errors: [],
-      results: uniqueFixtures.length,
-      paging: { current: 1, total: 1 },
-      response: uniqueFixtures,
-    },
-  };
+  return { ...response, data: { ...response.data, errors: [], results: uniqueFixtures.length, paging: { current: 1, total: 1 }, response: uniqueFixtures } };
 };
 
 console.log('=========================================');
@@ -80,12 +48,10 @@ console.log('=========================================');
 
 async function start(): Promise<void> {
   await ensureDatabase();
-  console.log('[DB] Connected to Neon PostgreSQL.');
+  await ensurePredictionIntegrity();
+  console.log('[DB] Connected to Neon PostgreSQL and prediction integrity guard enabled.');
   await startServer();
   await scannerScheduler.start();
 }
 
-start().catch((error) => {
-  console.error('[Startup] Critical backend error:', error);
-  process.exitCode = 1;
-});
+start().catch((error) => { console.error('[Startup] Critical backend error:', error); process.exitCode = 1; });
