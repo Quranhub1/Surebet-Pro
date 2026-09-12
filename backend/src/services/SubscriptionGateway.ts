@@ -69,7 +69,19 @@ export function installSubscriptionGateway(): void {
   const proto = express.application as any;
   for (const method of ['get', 'post', 'patch', 'delete', 'put']) { const original = proto[method]; proto[method] = function patchedRoute(path: any, ...handlers: any[]) { if (typeof path === 'string' && path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !path.startsWith('/api/admin/')) return original.call(this, path, requireAppSubscription, ...handlers); return original.call(this, path, ...handlers); }; }
   const originalListen = proto.listen;
-  proto.listen = function patchedListen(...args: any[]) { if (!this.__surebetSubscriptionRoutesInstalled) { registerRoutes(this); this.__surebetSubscriptionRoutesInstalled = true; } return originalListen.apply(this, args); };
+  proto.listen = function patchedListen(...args: any[]) {
+    if (!this.__surebetSubscriptionRoutesInstalled) {
+      const router = this._router;
+      const before = Array.isArray(router?.stack) ? router.stack.length : 0;
+      registerRoutes(this);
+      if (router?.stack && router.stack.length > before) {
+        const added = router.stack.splice(before);
+        router.stack.unshift(...added);
+      }
+      this.__surebetSubscriptionRoutesInstalled = true;
+    }
+    return originalListen.apply(this, args);
+  };
 }
 
 export { ensureUserSubscriptionColumns };
