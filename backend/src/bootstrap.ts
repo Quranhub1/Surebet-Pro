@@ -1,5 +1,3 @@
-// Load the CommonJS compatibility patch before index.ts creates the analysis service.
-// Start fixture display repair after the database initialization performed by index.ts.
 import './fixture-metadata-runtime-patch.cjs';
 import './index.ts';
 
