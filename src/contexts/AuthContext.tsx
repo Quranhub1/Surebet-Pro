@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+// The frontend may be hosted separately from the API service. Keep the API origin
+// configurable while providing the current Render backend as the production fallback.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://surebet-pro-n81z.onrender.com').replace(/\/$/, '');
 const TOKEN_KEY = 'surebetpro_session';
 
 export interface User { id: string; email: string; name: string; role: string; plan: string; }
