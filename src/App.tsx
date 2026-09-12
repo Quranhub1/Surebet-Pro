@@ -2,10 +2,6 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
-import { Calculator } from './pages/Calculator';
-import { Strategy } from './pages/Strategy';
-import { Alerts } from './pages/Alerts';
-import { Reports } from './pages/Reports';
 import { Admin } from './pages/Admin';
 import { Auth } from './pages/Auth';
 import { Settings } from './pages/Settings';
@@ -43,14 +39,10 @@ function AppRoutes() {
       <main className="relative min-w-0 flex-1 overflow-y-auto">
         <div className="sticky top-0 z-30 flex h-14 items-center border-b border-[#222] bg-[#0a0a0a]/95 px-4 backdrop-blur md:hidden">
           <button onClick={() => setMobileMenuOpen(true)} aria-label="Open navigation" className="rounded-lg p-2 text-gray-300 hover:bg-[#1a1a1a] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#39FF14]"><Menu className="h-6 w-6" /></button>
-          <span className="ml-3 text-lg font-extrabold tracking-tight">Surebet<span className="text-[#39FF14]">Pro</span></span>
+          <span className="ml-3 text-lg font-extrabold tracking-tight">Football<span className="text-[#39FF14]">AI</span></span>
         </div>
         <Routes>
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/calculator" element={<ProtectedRoute><Calculator /></ProtectedRoute>} />
-          <Route path="/strategy" element={<ProtectedRoute><Strategy /></ProtectedRoute>} />
-          <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
-          <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
