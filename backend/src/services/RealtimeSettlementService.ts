@@ -192,16 +192,41 @@ class RealtimeSettlementService {
     return intersection / Math.max(leftTokens.size, rightTokens.size);
   }
 
+  private extractTeamName(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (!value || typeof value !== 'object') return null;
+    const object = value as Record<string, unknown>;
+    for (const key of ['name', 'teamName', 'team_name', 'displayName', 'display_name', 'title', 'shortName', 'short_name']) {
+      const candidate = object[key];
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    }
+    for (const key of ['team', 'home_team', 'away_team', 'homeTeam', 'awayTeam']) {
+      const nested = this.extractTeamName(object[key]);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  private extractEventId(event: any): string | null {
+    const id = event?.id ?? event?.event_id ?? event?.fixture_id ?? event?.match_id ?? event?.fixture?.id ?? event?.event?.id;
+    return id === null || id === undefined || id === '' ? null : String(id);
+  }
+
   private isMatchingEvent(event: any, row: PendingMatch): boolean {
-    const home = event?.home_team?.name ?? event?.home_team ?? event?.home;
-    const away = event?.away_team?.name ?? event?.away_team ?? event?.away;
+    // BSD fixture IDs are the authoritative join key. Use them before fuzzy
+    // team matching because team naming varies considerably across competitions.
+    const eventId = this.extractEventId(event);
+    if (eventId && eventId === String(row.fixture_id)) return true;
+
+    const home = this.extractTeamName(event?.home_team ?? event?.homeTeam ?? event?.home ?? event?.teams?.home ?? event?.event?.home_team ?? event?.event?.home);
+    const away = this.extractTeamName(event?.away_team ?? event?.awayTeam ?? event?.away ?? event?.teams?.away ?? event?.event?.away_team ?? event?.event?.away);
     if (!home || !away) return false;
 
     const homeSimilarity = this.teamSimilarity(home, row.home_team);
     const awaySimilarity = this.teamSimilarity(away, row.away_team);
     if (homeSimilarity < 0.6 || awaySimilarity < 0.6) return false;
 
-    const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time;
+    const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time ?? event?.event?.kickoff_at ?? event?.event?.date;
     if (!eventKickoff) return true;
     const difference = Math.abs(new Date(eventKickoff).getTime() - new Date(row.kickoff_at).getTime());
     return Number.isFinite(difference) && difference <= 6 * 60 * 60 * 1000;
@@ -217,8 +242,8 @@ class RealtimeSettlementService {
 
   private readScore(fixture: any, side: 'home' | 'away'): number | null {
     const value = side === 'home'
-      ? fixture?.home_score ?? fixture?.score?.home ?? fixture?.scores?.home
-      : fixture?.away_score ?? fixture?.score?.away ?? fixture?.scores?.away;
+      ? fixture?.home_score ?? fixture?.score?.home ?? fixture?.scores?.home ?? fixture?.goals?.home
+      : fixture?.away_score ?? fixture?.score?.away ?? fixture?.scores?.away ?? fixture?.goals?.away;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
