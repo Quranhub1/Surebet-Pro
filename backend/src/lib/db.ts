@@ -6,6 +6,29 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required for Neon PostgreSQL.');
 export const sql = neon(databaseUrl);
 
+export async function acquireAnalysisLock(): Promise<boolean> {
+  const rows = await sql`
+    UPDATE system_settings
+    SET analysis_last_run_status = 'running', analysis_lock_at = NOW()
+    WHERE id = 1
+      AND (
+        analysis_last_run_status IS DISTINCT FROM 'running'
+        OR analysis_lock_at IS NULL
+        OR analysis_lock_at < NOW() - INTERVAL '2 minutes'
+      )
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+export async function releaseAnalysisLock(status: string, markRunAt = true): Promise<void> {
+  await sql`
+    UPDATE system_settings
+    SET analysis_last_run_status = ${status},
+        analysis_last_run_at = CASE WHEN ${markRunAt} THEN NOW() ELSE analysis_last_run_at END,
+        analysis_lock_at = NULL
+    WHERE id = 1`;
+}
+
 export async function ensureDatabase(): Promise<void> {
   await sql`CREATE TABLE IF NOT EXISTS system_settings (id integer PRIMARY KEY, min_roi double precision NOT NULL DEFAULT 1, deep_scan boolean NOT NULL DEFAULT true, odds_api_key text, api_base_url text, api_endpoint_odds text, last_run_date text, last_run_at timestamptz, last_run_status text, analysis_last_run_at timestamptz, analysis_last_run_status text, analysis_lock_at timestamptz)`;
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS min_roi double precision NOT NULL DEFAULT 1`;
