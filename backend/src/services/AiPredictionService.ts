@@ -24,8 +24,11 @@ export class AiPredictionService {
     if (!footballDataService.isConfigured()) throw new Error('FOOTBALL_DATA_API_TOKEN is not configured.');
 
     const upcoming = await footballDataService.getUpcomingMatches(7);
-    const selected = upcoming.slice(0, Math.min(limit, upcoming.length));
-    console.log(`[FootballData] Loaded ${upcoming.length} upcoming matches from football-data.org; selected ${selected.length}.`);
+    // Analyze every fixture returned by football-data.org. The limit parameter remains
+    // for backward compatibility, but the production flow deliberately processes the
+    // complete fetched set so no published game is silently skipped.
+    const selected = upcoming;
+    console.log(`[FootballData] Loaded ${upcoming.length} upcoming matches from football-data.org; selected ${selected.length} for complete analysis.`);
 
     if (!selected.length) {
       this.cache = { expiresAt: Date.now() + 15 * 60 * 1000, data: [] };
