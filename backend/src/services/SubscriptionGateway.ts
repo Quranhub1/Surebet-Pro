@@ -21,15 +21,20 @@ async function ensureUserSubscriptionColumns(): Promise<void> {
 async function subscriptionState(userId: string) {
   let rows = await sql`SELECT id, email, trial_started_at, subscription_status, subscription_expires_at, subscription_requested_at FROM users WHERE id = ${userId} LIMIT 1`;
   if (!rows[0]) return null;
-  if (!rows[0].trial_started_at) rows = await sql`UPDATE users SET trial_started_at = NOW() WHERE id = ${userId} AND trial_started_at IS NULL RETURNING id, email, trial_started_at, subscription_status, subscription_expires_at, subscription_requested_at`;
   const row = rows[0];
-  const trialStartedAt = row.trial_started_at ? new Date(row.trial_started_at) : new Date();
+  const admin = String(row.email || '').trim().toLowerCase() === configuredAdminEmail();
+  if (admin) {
+    return { trialActive: false, trialStartedAt: row.trial_started_at ? new Date(row.trial_started_at).toISOString() : new Date().toISOString(), trialExpiresAt: null, subscriptionStatus: 'active', subscriptionExpiresAt: null, paymentAmountUgx: PAYMENT_AMOUNT_UGX, paymentNumber: PAYMENT_NUMBER, paymentName: PAYMENT_NAME, permanent: true };
+  }
+  if (!row.trial_started_at) rows = await sql`UPDATE users SET trial_started_at = NOW() WHERE id = ${userId} AND trial_started_at IS NULL RETURNING id, email, trial_started_at, subscription_status, subscription_expires_at, subscription_requested_at`;
+  const current = rows[0];
+  const trialStartedAt = current.trial_started_at ? new Date(current.trial_started_at) : new Date();
   const trialExpiresAt = new Date(trialStartedAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-  const subscriptionExpiresAt = row.subscription_expires_at ? new Date(row.subscription_expires_at) : null;
-  const active = String(row.subscription_status) === 'active' && !!subscriptionExpiresAt && subscriptionExpiresAt.getTime() > Date.now();
+  const subscriptionExpiresAt = current.subscription_expires_at ? new Date(current.subscription_expires_at) : null;
+  const active = String(current.subscription_status) === 'active' && !!subscriptionExpiresAt && subscriptionExpiresAt.getTime() > Date.now();
   const trialActive = !active && Date.now() < trialExpiresAt.getTime();
-  if (String(row.subscription_status) === 'active' && subscriptionExpiresAt && subscriptionExpiresAt.getTime() <= Date.now()) await sql`UPDATE users SET subscription_status = 'expired' WHERE id = ${userId} AND subscription_status = 'active'`;
-  return { trialActive, trialStartedAt: trialStartedAt.toISOString(), trialExpiresAt: trialExpiresAt.toISOString(), subscriptionStatus: active ? 'active' : String(row.subscription_status) === 'pending' ? 'pending' : String(row.subscription_status) === 'active' ? 'expired' : String(row.subscription_status), subscriptionExpiresAt: subscriptionExpiresAt?.toISOString() || null, paymentAmountUgx: PAYMENT_AMOUNT_UGX, paymentNumber: PAYMENT_NUMBER, paymentName: PAYMENT_NAME };
+  if (String(current.subscription_status) === 'active' && subscriptionExpiresAt && subscriptionExpiresAt.getTime() <= Date.now()) await sql`UPDATE users SET subscription_status = 'expired' WHERE id = ${userId} AND subscription_status = 'active'`;
+  return { trialActive, trialStartedAt: trialStartedAt.toISOString(), trialExpiresAt: trialExpiresAt.toISOString(), subscriptionStatus: active ? 'active' : String(current.subscription_status) === 'pending' ? 'pending' : String(current.subscription_status) === 'active' ? 'expired' : String(current.subscription_status), subscriptionExpiresAt: subscriptionExpiresAt?.toISOString() || null, paymentAmountUgx: PAYMENT_AMOUNT_UGX, paymentNumber: PAYMENT_NUMBER, paymentName: PAYMENT_NAME, permanent: false };
 }
 
 async function requireAppSubscription(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -71,7 +76,7 @@ subscriptionRouter.post('/api/subscription/request', async (req, res) => {
   const userId = sessionUserId(req);
   if (!userId) return res.status(401).json({ ok: false, error: 'Authentication required' });
   try {
-    if (await isAdmin(userId)) return res.json({ ok: true, isAdmin: true });
+    if (await isAdmin(userId)) return res.json({ ok: true, isAdmin: true, subscription: await subscriptionState(userId) });
     await subscriptionState(userId);
     await sql`UPDATE users SET subscription_status = 'pending', subscription_requested_at = NOW() WHERE id = ${userId}`;
     const state = await subscriptionState(userId);
@@ -86,13 +91,15 @@ subscriptionRouter.get('/api/admin/subscriptions/users', async (req, res) => {
   if (!await requireAdmin(req, res)) return;
   try {
     const rows = await sql`SELECT id, email, name, role, trial_started_at, subscription_status, subscription_expires_at, subscription_requested_at FROM users ORDER BY CASE WHEN subscription_status = 'pending' THEN 0 ELSE 1 END, subscription_requested_at DESC NULLS LAST, email ASC`;
-    return res.json({ ok: true, users: rows.map((row: any) => ({ id: String(row.id), email: String(row.email), name: String(row.name || ''), role: String(row.role || 'USER'), trialStartedAt: row.trial_started_at ? new Date(row.trial_started_at).toISOString() : null, subscriptionStatus: String(row.subscription_status || 'inactive'), subscriptionExpiresAt: row.subscription_expires_at ? new Date(row.subscription_expires_at).toISOString() : null, paymentRequestedAt: row.subscription_requested_at ? new Date(row.subscription_requested_at).toISOString() : null })) });
+    const adminEmail = configuredAdminEmail();
+    return res.json({ ok: true, users: rows.map((row: any) => { const rowIsAdmin = String(row.email || '').trim().toLowerCase() === adminEmail; return { id: String(row.id), email: String(row.email), name: String(row.name || ''), role: String(row.role || 'USER'), isAdmin: rowIsAdmin, trialStartedAt: row.trial_started_at ? new Date(row.trial_started_at).toISOString() : null, subscriptionStatus: rowIsAdmin ? 'active' : String(row.subscription_status || 'inactive'), subscriptionExpiresAt: rowIsAdmin ? null : (row.subscription_expires_at ? new Date(row.subscription_expires_at).toISOString() : null), paymentRequestedAt: rowIsAdmin ? null : (row.subscription_requested_at ? new Date(row.subscription_requested_at).toISOString() : null) }; }) });
   } catch (error) { console.error('[Admin] User subscription list failed:', error); return res.status(500).json({ ok: false, error: 'Failed to load users' }); }
 });
 
 subscriptionRouter.post('/api/admin/subscriptions/:userId/approve', async (req, res) => {
   if (!await requireAdmin(req, res)) return;
   try {
+    if (await isAdmin(req.params.userId)) return res.status(400).json({ ok: false, error: 'Administrator access is permanently active and cannot be changed' });
     const rows = await sql`UPDATE users SET subscription_status = 'active', subscription_expires_at = GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + INTERVAL '7 days', subscription_requested_at = NULL WHERE id = ${req.params.userId} RETURNING id, email, subscription_status, subscription_expires_at`;
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
     return res.json({ ok: true, user: { id: String(rows[0].id), email: String(rows[0].email), subscriptionStatus: String(rows[0].subscription_status), subscriptionExpiresAt: new Date(rows[0].subscription_expires_at).toISOString() } });
@@ -102,6 +109,7 @@ subscriptionRouter.post('/api/admin/subscriptions/:userId/approve', async (req, 
 subscriptionRouter.post('/api/admin/subscriptions/:userId/revoke', async (req, res) => {
   if (!await requireAdmin(req, res)) return;
   try {
+    if (await isAdmin(req.params.userId)) return res.status(400).json({ ok: false, error: 'Administrator access is permanently active and cannot be changed' });
     const rows = await sql`UPDATE users SET subscription_status = 'inactive', subscription_expires_at = NULL, subscription_requested_at = NULL WHERE id = ${req.params.userId} RETURNING id, email, subscription_status`;
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
     return res.json({ ok: true, user: { id: String(rows[0].id), email: String(rows[0].email), subscriptionStatus: String(rows[0].subscription_status) } });
