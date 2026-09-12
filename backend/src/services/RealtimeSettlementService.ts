@@ -40,9 +40,23 @@ class RealtimeSettlementService {
   }
 
   public async refreshSchedules(): Promise<void> {
+    // Repair legacy placeholder metadata before scheduling. The dashboard and
+    // settlement scheduler must never operate on synthetic Home/Away names.
+    await sql`
+      UPDATE football_fixtures
+      SET league_name = COALESCE(NULLIF(league_name, ''), raw_data->'league'->>'name', league_name),
+          home_team = COALESCE(NULLIF(home_team, ''), raw_data->'teams'->'home'->>'name', home_team),
+          away_team = COALESCE(NULLIF(away_team, ''), raw_data->'teams'->'away'->>'name', away_team),
+          updated_at = NOW()
+      WHERE (league_name IS NULL OR league_name = '' OR lower(league_name) IN ('unknown league', 'unknown'))
+         OR (home_team IS NULL OR home_team = '' OR lower(home_team) IN ('home', 'home team', 'unknown'))
+         OR (away_team IS NULL OR away_team = '' OR lower(away_team) IN ('away', 'away team', 'unknown'))`;
+
     const pending = await sql<PendingMatch[]>`
       SELECT p.fixture_id, p.winner, p.predicted_home_goals, p.predicted_away_goals,
-             f.home_team, f.away_team, f.kickoff_at
+             COALESCE(NULLIF(f.home_team, ''), NULLIF(f.raw_data->'teams'->'home'->>'name', ''), 'Home') AS home_team,
+             COALESCE(NULLIF(f.away_team, ''), NULLIF(f.raw_data->'teams'->'away'->>'name', ''), 'Away') AS away_team,
+             f.kickoff_at
       FROM football_ai_predictions p
       JOIN football_fixtures f ON f.id = p.fixture_id
       WHERE p.settled_at IS NULL
@@ -127,8 +141,8 @@ class RealtimeSettlementService {
     const key = String(process.env.BSD_API_KEY || '').trim();
     if (!key) throw new Error('BSD_API_KEY is not configured.');
 
-    // API-Football and BSD can use different fixture IDs. Try the ID first,
-    // but never assume an API-Football ID is a BSD event ID.
+    // API-Football and BSD can use different fixture IDs. A numeric ID match is
+    // only accepted after team validation when the event contains team names.
     try {
       const response = await axios.get(`${BSD_BASE_URL}/events/${encodeURIComponent(row.fixture_id)}/`, {
         headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
@@ -138,36 +152,65 @@ class RealtimeSettlementService {
       const direct = data?.event || data?.result || (Array.isArray(data?.results) ? data.results[0] : data?.results) || data;
       if (direct && this.isMatchingEvent(direct, row)) return direct;
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status !== 404) throw error;
+      if (axios.isAxiosError(error) && ![400, 404].includes(error.response?.status || 0)) throw error;
     }
 
     const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
 
-    // First ask BSD to narrow the archive by the home team name. BSD documents
-    // team_name as a fuzzy filter, which is much more reliable than scanning a
-    // date-wide catalogue when upstream providers use different team labels.
+    // BSD supports fuzzy team_name filtering. Query both sides, then score all
+    // returned candidates instead of requiring one brittle string threshold.
+    const candidates: any[] = [];
     for (const teamName of [row.home_team, row.away_team]) {
       try {
         const response = await axios.get(`${BSD_BASE_URL}/events/`, {
-          params: { date_from: date, date_to: date, status: 'finished', team_name: teamName, limit: 200, offset: 0 },
+          params: { date_from: date, date_to: date, team_name: teamName, limit: 200, offset: 0 },
           headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
           timeout: 20_000,
         });
-        const candidates = Array.isArray(response.data?.results) ? response.data.results : [];
-        const match = candidates.find(event => this.isMatchingEvent(event, row));
-        if (match) {
-          console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD team_name search (${teamName}).`);
-          return match;
-        }
+        const page = Array.isArray(response.data?.results) ? response.data.results : [];
+        candidates.push(...page);
       } catch (error) {
         console.warn(`[History] BSD team search failed for ${teamName}:`, error instanceof Error ? error.message : error);
       }
     }
 
+    const bestTargeted = this.findBestMatch(candidates, row);
+    if (bestTargeted) {
+      console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD targeted team search.`);
+      return bestTargeted;
+    }
+
     const events = await this.getEventsForDate(date, key);
-    const match = events.find(event => this.isMatchingEvent(event, row));
+    const match = this.findBestMatch(events, row);
     if (!match) throw new Error(`BSD event not found for ${row.home_team} vs ${row.away_team} on ${date}`);
     return match;
+  }
+
+  private findBestMatch(events: any[], row: PendingMatch): any | null {
+    const unique = Array.from(new Map(events.map(event => [this.extractEventId(event) || JSON.stringify(event), event])).values());
+    let best: { event: any; score: number } | null = null;
+    for (const event of unique) {
+      const score = this.matchScore(event, row);
+      if (score >= 1.0 && (!best || score > best.score)) best = { event, score };
+    }
+    return best?.event || null;
+  }
+
+  private matchScore(event: any, row: PendingMatch): number {
+    const home = this.extractTeamName(event?.home_team ?? event?.homeTeam ?? event?.home ?? event?.teams?.home ?? event?.event?.home_team ?? event?.event?.home);
+    const away = this.extractTeamName(event?.away_team ?? event?.awayTeam ?? event?.away ?? event?.teams?.away ?? event?.event?.away_team ?? event?.event?.away);
+    if (!home || !away) return 0;
+
+    const direct = this.teamSimilarity(home, row.home_team) + this.teamSimilarity(away, row.away_team);
+    const swapped = this.teamSimilarity(home, row.away_team) + this.teamSimilarity(away, row.home_team);
+    const teamScore = Math.max(direct, swapped);
+    if (teamScore < 1.0) return 0;
+
+    const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time ?? event?.event?.kickoff_at ?? event?.event?.date;
+    if (!eventKickoff) return teamScore;
+    const difference = Math.abs(new Date(eventKickoff).getTime() - new Date(row.kickoff_at).getTime());
+    if (!Number.isFinite(difference) || difference > 18 * 60 * 60 * 1000) return 0;
+    return teamScore + (difference <= 3 * 60 * 60 * 1000 ? 0.25 : difference <= 9 * 60 * 60 * 1000 ? 0.1 : 0);
   }
 
   private async getEventsForDate(date: string, key: string): Promise<any[]> {
@@ -245,21 +288,12 @@ class RealtimeSettlementService {
   }
 
   private isMatchingEvent(event: any, row: PendingMatch): boolean {
-    const eventId = this.extractEventId(event);
-    if (eventId && eventId === String(row.fixture_id)) return true;
-
     const home = this.extractTeamName(event?.home_team ?? event?.homeTeam ?? event?.home ?? event?.teams?.home ?? event?.event?.home_team ?? event?.event?.home);
     const away = this.extractTeamName(event?.away_team ?? event?.awayTeam ?? event?.away ?? event?.teams?.away ?? event?.event?.away_team ?? event?.event?.away);
-    if (!home || !away) return false;
-
-    const homeSimilarity = this.teamSimilarity(home, row.home_team);
-    const awaySimilarity = this.teamSimilarity(away, row.away_team);
-    if (homeSimilarity < 0.5 || awaySimilarity < 0.5) return false;
-
-    const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time ?? event?.event?.kickoff_at ?? event?.event?.date;
-    if (!eventKickoff) return true;
-    const difference = Math.abs(new Date(eventKickoff).getTime() - new Date(row.kickoff_at).getTime());
-    return Number.isFinite(difference) && difference <= 12 * 60 * 60 * 1000;
+    // If the provider gives no names, an ID-only response is still usable.
+    const eventId = this.extractEventId(event);
+    if ((!home || !away) && eventId === String(row.fixture_id)) return true;
+    return this.matchScore(event, row) >= 1.0;
   }
 
   private normalizeStatus(fixture: any): string {
