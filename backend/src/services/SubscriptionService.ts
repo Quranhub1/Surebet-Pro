@@ -5,7 +5,7 @@ export const SUBSCRIPTION_PRICE_UGX = 5000;
 export const PAYMENT_NUMBER = '0749846848';
 export const PAYMENT_NAME = 'Kabali Madina';
 
-export type SubscriptionStatus = 'trial' | 'pending' | 'active' | 'banned';
+export type SubscriptionStatus = 'trial' | 'expired' | 'pending' | 'active' | 'banned';
 
 export interface SubscriptionInfo {
   id: string;
@@ -36,11 +36,11 @@ export async function ensureUserSubscription(userId: string): Promise<Subscripti
 export async function getEffectiveSubscription(userId: string): Promise<SubscriptionInfo> {
   const subscription = await ensureUserSubscription(userId);
   if (subscription.status === 'trial' && new Date(subscription.trialEndsAt).getTime() <= Date.now()) {
-    await sql`UPDATE subscriptions SET status = 'pending', updated_at = NOW() WHERE user_id = ${userId} AND status = 'trial' AND trial_ends_at <= NOW()`;
+    await sql`UPDATE subscriptions SET status = 'expired', updated_at = NOW() WHERE user_id = ${userId} AND status = 'trial' AND trial_ends_at <= NOW()`;
     return ensureUserSubscription(userId);
   }
   if (subscription.status === 'active' && subscription.expiresAt && new Date(subscription.expiresAt).getTime() <= Date.now()) {
-    await sql`UPDATE subscriptions SET status = 'pending', updated_at = NOW() WHERE user_id = ${userId} AND status = 'active' AND expires_at <= NOW()`;
+    await sql`UPDATE subscriptions SET status = 'expired', updated_at = NOW() WHERE user_id = ${userId} AND status = 'active' AND expires_at <= NOW()`;
     return ensureUserSubscription(userId);
   }
   return subscription;
@@ -57,7 +57,7 @@ export async function requestPayment(userId: string): Promise<SubscriptionInfo> 
 
 export async function listSubscriptions(): Promise<any[]> {
   await ensureSubscriptionSchema();
-  return sql`SELECT s.id, s.user_id, u.name, u.email, u.role, s.status, s.trial_ends_at, s.requested_at, s.approved_at, s.expires_at, s.created_at, s.updated_at FROM subscriptions s JOIN users u ON u.id = s.user_id ORDER BY CASE s.status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 WHEN 'trial' THEN 2 WHEN 'banned' THEN 3 ELSE 4 END, s.updated_at DESC`;
+  return sql`SELECT s.id, s.user_id, u.name, u.email, u.role, s.status, s.trial_ends_at, s.requested_at, s.approved_at, s.expires_at, s.created_at, s.updated_at FROM subscriptions s JOIN users u ON u.id = s.user_id ORDER BY CASE s.status WHEN 'pending' THEN 0 WHEN 'expired' THEN 1 WHEN 'active' THEN 2 WHEN 'trial' THEN 3 WHEN 'banned' THEN 4 ELSE 5 END, s.updated_at DESC`;
 }
 
 export async function approveSubscription(subscriptionId: string): Promise<SubscriptionInfo> {
@@ -83,11 +83,5 @@ export async function deleteSubscription(subscriptionId: string): Promise<void> 
 
 function mapSubscription(row: any): SubscriptionInfo {
   if (!row) throw new Error('Subscription not found.');
-  return {
-    id: String(row.id), userId: String(row.user_id), status: String(row.status) as SubscriptionStatus,
-    trialEndsAt: new Date(row.trial_ends_at).toISOString(),
-    requestedAt: row.requested_at ? new Date(row.requested_at).toISOString() : null,
-    approvedAt: row.approved_at ? new Date(row.approved_at).toISOString() : null,
-    expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
-  };
+  return { id: String(row.id), userId: String(row.user_id), status: String(row.status) as SubscriptionStatus, trialEndsAt: new Date(row.trial_ends_at).toISOString(), requestedAt: row.requested_at ? new Date(row.requested_at).toISOString() : null, approvedAt: row.approved_at ? new Date(row.approved_at).toISOString() : null, expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null };
 }
