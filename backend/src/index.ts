@@ -2,6 +2,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { ensureDatabase } from './lib/db';
 import { ensurePredictionIntegrity } from './services/PredictionIntegrityService';
+import { ensurePredictionAnalytics } from './services/PredictionAnalyticsService';
 import { scannerScheduler } from './engine/ScannerScheduler';
 import { startServer } from './server';
 
@@ -49,7 +50,8 @@ console.log('=========================================');
 async function start(): Promise<void> {
   await ensureDatabase();
   await ensurePredictionIntegrity();
-  console.log('[DB] Connected to Neon PostgreSQL and prediction integrity guard enabled.');
+  await ensurePredictionAnalytics();
+  console.log('[DB] Connected to Neon PostgreSQL and prediction integrity, analytics audit guards enabled.');
   await startServer();
   await scannerScheduler.start();
 }
