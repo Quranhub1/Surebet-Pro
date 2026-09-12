@@ -53,8 +53,6 @@ async function executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
-// Preserve Neon tagged-template behaviour while transparently retrying calls.
-// This covers every SQL query in the application, including future modules.
 export const sql = new Proxy(rawSql as any, {
   apply(target, thisArg, args) {
     return executeWithRetry(() => Reflect.apply(target, thisArg, args));
@@ -156,32 +154,50 @@ export async function ensureDatabase(): Promise<void> {
   await sql`INSERT INTO bookmakers (key, title, active) VALUES ('superbet', 'Superbet', true), ('novibet', 'Novibet', true) ON CONFLICT (key) DO NOTHING`;
   await sql`INSERT INTO sports (key, title, description, active) VALUES ('soccer', 'Football', 'Football and soccer leagues', true) ON CONFLICT (key) DO NOTHING`;
 
-  // Repair legacy placeholder metadata from the stored source payload. This
-  // runs on every startup so old 12-hour analysis rows are corrected as well.
+  // Never manufacture football team names. Recover them only from trusted source payloads.
   await sql`
     UPDATE football_fixtures
     SET league_name = CASE
           WHEN LOWER(BTRIM(league_name)) IN ('', 'unknown', 'unknown league', 'n/a', 'na')
-            THEN COALESCE(NULLIF(BTRIM(raw_data->'league'->>'name'), ''), 'Football')
+            THEN COALESCE(NULLIF(BTRIM(raw_data->'league'->>'name'), ''), league_name)
           ELSE league_name
         END,
         home_team = CASE
-          WHEN LOWER(BTRIM(home_team)) IN ('', 'home', 'unknown', 'n/a', 'na')
-            THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'home'->>'name'), ''), 'Home')
+          WHEN LOWER(BTRIM(home_team)) IN ('', 'home', 'home team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
+            THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'home'->>'name'), ''), home_team)
           ELSE home_team
         END,
         away_team = CASE
-          WHEN LOWER(BTRIM(away_team)) IN ('', 'away', 'unknown', 'n/a', 'na')
-            THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'away'->>'name'), ''), 'Away')
+          WHEN LOWER(BTRIM(away_team)) IN ('', 'away', 'away team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
+            THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'away'->>'name'), ''), away_team)
           ELSE away_team
         END,
         updated_at = NOW()
     WHERE raw_data IS NOT NULL
       AND (
         LOWER(BTRIM(league_name)) IN ('', 'unknown', 'unknown league', 'n/a', 'na')
-        OR LOWER(BTRIM(home_team)) IN ('', 'home', 'unknown', 'n/a', 'na')
-        OR LOWER(BTRIM(away_team)) IN ('', 'away', 'unknown', 'n/a', 'na')
+        OR LOWER(BTRIM(home_team)) IN ('', 'home', 'home team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
+        OR LOWER(BTRIM(away_team)) IN ('', 'away', 'away team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
       )
+  `;
+
+  // Remove any legacy AI predictions attached to fixtures that still have no real teams.
+  await sql`
+    DELETE FROM football_ai_predictions p
+    USING football_fixtures f
+    WHERE p.fixture_id = f.id
+      AND (
+        LOWER(BTRIM(f.home_team)) IN ('', 'home', 'home team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
+        OR LOWER(BTRIM(f.away_team)) IN ('', 'away', 'away team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
+      )
+  `;
+
+  // Invalid fixture rows are not analysis candidates. Delete only rows whose names
+  // remain placeholders after source-payload repair, preserving legitimate football data.
+  await sql`
+    DELETE FROM football_fixtures
+    WHERE LOWER(BTRIM(home_team)) IN ('', 'home', 'home team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
+       OR LOWER(BTRIM(away_team)) IN ('', 'away', 'away team', 'unknown', 'unknown team', 'tbd', 'n/a', 'na', '-')
   `;
 }
 
