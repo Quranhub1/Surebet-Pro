@@ -120,7 +120,7 @@ axios.get = async function resilientFootballGet(url: string, config: any = {}) {
         return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
       }
       if (path === '/predictions' && params?.fixture != null) {
-        const data = await requestBsd('/events/' + encodeURIComponent(String(params.fixture)) + '/prediction/ ', {});
+        const data = await requestBsd('/events/' + encodeURIComponent(String(params.fixture)) + '/prediction/', {});
         const item = Array.isArray(data) ? data[0] : data;
         return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: item ? 1 : 0, paging: { current: 1, total: 1 }, response: item ? [bsdPredictionToApiFootball(item)] : [] } } as any;
       }
