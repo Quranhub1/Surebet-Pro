@@ -3,6 +3,7 @@ import './fixture-display-repair-runtime.cjs';
 import './realtime-settlement-runtime-patch.cjs';
 import './index.ts';
 import './football-provider-fallback-runtime-patch.cjs';
+import './external-fixture-fallback-runtime.cjs';
 
 setTimeout(() => {
   void import('./fixture-display-repair')
