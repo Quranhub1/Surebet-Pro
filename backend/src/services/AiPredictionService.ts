@@ -10,6 +10,13 @@ export interface AiMatchPrediction {
   aiProvider: AiProvider | null; aiModel: string | null;
 }
 
+export interface PredictionHistoryItem extends AiMatchPrediction {
+  actualHomeScore: number | null;
+  actualAwayScore: number | null;
+  predictionResult: 'true' | 'lose' | 'pending' | null;
+  settledAt: string | null;
+}
+
 const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
 const FREE_PLAN_MINUTE_DELAY_MS = 6500;
 const ANALYSIS_TTL_MS = 12 * 60 * 60 * 1000;
@@ -49,12 +56,8 @@ export class AiPredictionService {
     if (!models.length) throw new Error('Neither Gemini nor Groq API key is configured.');
     if (!(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY)) throw new Error('API-Football key is not configured.');
 
+    await this.settleCompletedPredictions();
     const cycleExpiresAt = new Date(Date.now() + ANALYSIS_TTL_MS);
-
-    // Always build the cycle from a fresh, de-duplicated API-Football fixture list first.
-    // The previous implementation started with DB rows and then mixed string fixture IDs
-    // with numeric API IDs, which allowed the same match to be selected twice and could
-    // leave a cycle with only 2-3 games instead of the requested 40.
     const freshFixtures = await this.fetchUpcomingFixtures(limit);
     const selected: any[] = [];
     const known = new Set<string>();
@@ -66,10 +69,9 @@ export class AiPredictionService {
       if (selected.length >= limit) break;
     }
 
-    // If the API temporarily returns fewer fixtures, retain valid DB fixtures to fill the cycle.
     if (selected.length < limit) {
       const existing = await sql`
-        SELECT id, league_name, home_team, away_team, kickoff_at, status, analysis_expires_at
+        SELECT id, league_id, league_name, country, season, home_team_id, home_team, away_team_id, away_team, kickoff_at, status, home_score, away_score, raw_data, analysis_expires_at
         FROM football_fixtures
         WHERE analysis_expires_at > NOW() AND status IN ('NS', 'TBD')
         ORDER BY kickoff_at ASC LIMIT ${limit}`;
@@ -87,8 +89,6 @@ export class AiPredictionService {
       return [];
     }
 
-    // Publish all fixtures to Neon before the first AI call. This makes all 40 cards
-    // visible to the dashboard immediately, while the AI result for each card is filled later.
     await Promise.all(selected.map(async fixture => {
       await this.storeFixture(fixture.raw || fixture, cycleExpiresAt);
       await sql`UPDATE football_fixtures SET analysis_expires_at = COALESCE(analysis_expires_at, ${cycleExpiresAt.toISOString()}), updated_at = NOW() WHERE id = ${String(fixture.id ?? fixture.fixture?.id)}`;
@@ -156,6 +156,72 @@ export class AiPredictionService {
     return results;
   }
 
+  public async getHistory(from?: string, to?: string): Promise<{ items: PredictionHistoryItem[]; summary: { total: number; correct: number; failed: number; pending: number; accuracy: number } }> {
+    await this.settleCompletedPredictions();
+    const start = from ? new Date(`${from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86400000);
+    const end = to ? new Date(`${to}T23:59:59.999Z`) : new Date();
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) throw new Error('Invalid history date range.');
+
+    const rows = await sql`
+      SELECT f.id, f.league_name, f.home_team, f.away_team, f.kickoff_at,
+             p.winner, p.advice, p.analysis, p.key_factors, p.confidence, p.home_win, p.draw, p.away_win,
+             p.under_over, p.predicted_home_goals, p.predicted_away_goals, p.ai_provider, p.ai_model,
+             p.actual_home_score, p.actual_away_score, p.prediction_result, p.settled_at
+      FROM football_ai_predictions p
+      JOIN football_fixtures f ON f.id = p.fixture_id
+      WHERE f.kickoff_at >= ${start.toISOString()} AND f.kickoff_at <= ${end.toISOString()}
+      ORDER BY f.kickoff_at DESC`;
+    const items = rows.map((row: any) => this.mapHistoryRow(row));
+    const correct = items.filter(item => item.predictionResult === 'true').length;
+    const failed = items.filter(item => item.predictionResult === 'lose').length;
+    const pending = items.filter(item => item.predictionResult === 'pending' || item.predictionResult === null).length;
+    const total = items.length;
+    return { items, summary: { total, correct, failed, pending, accuracy: correct + failed ? Number(((correct / (correct + failed)) * 100).toFixed(1)) : 0 } };
+  }
+
+  private async settleCompletedPredictions(): Promise<void> {
+    const pending = await sql`
+      SELECT p.fixture_id, p.winner, f.home_team, f.away_team, f.kickoff_at
+      FROM football_ai_predictions p
+      JOIN football_fixtures f ON f.id = p.fixture_id
+      WHERE p.settled_at IS NULL AND f.kickoff_at < NOW()
+      ORDER BY f.kickoff_at ASC LIMIT 200`;
+    if (!pending.length) return;
+
+    const dates = new Set(pending.map((row: any) => this.formatDate(new Date(row.kickoff_at))));
+    const byId = new Map<string, any>();
+    for (const date of dates) {
+      try {
+        const data = await this.requestFootball('/fixtures', { date });
+        for (const fixture of Array.isArray(data.response) ? data.response : []) byId.set(String(fixture.fixture?.id), fixture);
+      } catch (error) {
+        console.warn(`[History] Could not refresh completed fixtures for ${date}:`, error instanceof Error ? error.message : error);
+      }
+    }
+
+    let settled = 0;
+    for (const row of pending) {
+      const fixture = byId.get(String(row.fixture_id));
+      const status = String(fixture?.fixture?.status?.short || '');
+      if (!['FT', 'AET', 'PEN'].includes(status)) continue;
+      const homeScore = Number(fixture.goals?.home);
+      const awayScore = Number(fixture.goals?.away);
+      if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
+      const actualWinner = homeScore > awayScore ? row.home_team : homeScore < awayScore ? row.away_team : 'draw';
+      const predictionResult = row.winner && row.winner === actualWinner ? 'true' : 'lose';
+      await sql`
+        UPDATE football_fixtures
+        SET status = ${status}, home_score = ${homeScore}, away_score = ${awayScore}, raw_data = ${JSON.stringify(fixture)}, updated_at = NOW()
+        WHERE id = ${String(row.fixture_id)}`;
+      await sql`
+        UPDATE football_ai_predictions
+        SET actual_home_score = ${homeScore}, actual_away_score = ${awayScore}, prediction_result = ${predictionResult}, settled_at = NOW(), updated_at = NOW()
+        WHERE fixture_id = ${String(row.fixture_id)} AND settled_at IS NULL`;
+      settled += 1;
+    }
+    if (settled) console.log(`[History] Settled ${settled} completed AI predictions.`);
+  }
+
   private async fetchUpcomingFixtures(limit: number): Promise<any[]> {
     const found: any[] = [];
     const known = new Set<string>();
@@ -184,7 +250,7 @@ export class AiPredictionService {
   }
 
   private async generateOnePrediction(context: any, total: number, position: number): Promise<AiMatchPrediction | null> {
-    const system = `You are SureBet Pro's football analysis AI. Analyze one upcoming football match only. Do not discuss bookmakers, odds, stakes, ROI, arbitrage or gambling. Use only the supplied evidence. Never invent injuries, lineups, statistics or results. Return ONLY JSON. Schema: {"winner":"home team or away team or null","advice":"short football outcome","analysis":"2-3 evidence-based sentences","keyFactors":["3-5 short factors"],"confidence":0-100,"homeWin":0-100,"draw":0-100,"awayWin":0-100,"underOver":"short goal outlook","predictedHomeGoals":number,"predictedAwayGoals":number}. Probabilities should total about 100.`;
+    const system = `You are SureBet Pro's football analysis AI. Analyze one upcoming football match only. Do not discuss bookmakers, odds, stakes, ROI, arbitrage or gambling. Use only the supplied evidence. Never invent injuries, lineups, statistics or results. Return ONLY JSON. Schema: {"winner":"home team or away team or draw or null","advice":"short football outcome","analysis":"2-3 evidence-based sentences","keyFactors":["3-5 short factors"],"confidence":0-100,"homeWin":0-100,"draw":0-100,"awayWin":0-100,"underOver":"short goal outlook","predictedHomeGoals":number,"predictedAwayGoals":number}. Probabilities should total about 100.`;
     const prompt = `Match ${position}/${total}: ${context.home} vs ${context.away}. League: ${context.league}. Kickoff: ${context.kickoff}.\nAPI-Football forecast: ${JSON.stringify(context.apiPrediction)}\nComparison: ${JSON.stringify(this.compactObject(context.comparison))}\nH2H: ${JSON.stringify(context.h2h)}\nStored recent completed games: ${JSON.stringify(context.storedHistory?.slice?.(0, 8) || [])}\nMake a cautious, evidence-based prediction. Return the JSON object only.`;
     const estimatedTokens = Math.ceil((system.length + prompt.length) / 4) + AI_MAX_OUTPUT_TOKENS;
     const providers = this.rankProviders(position, estimatedTokens);
@@ -217,13 +283,8 @@ export class AiPredictionService {
     const configured = getAiModels().filter(item => item.configured).map(item => item.provider);
     const now = Date.now();
     if (configured.length <= 1) return configured;
-
-    // Normal operation is strict round-robin by game position: game 1 Gemini, game 2 Groq,
-    // game 3 Gemini, game 4 Groq, and so on. If the preferred provider is cooling down or
-    // unavailable, the other configured provider is used as the fallback for that game.
     const preferred: AiProvider = position % 2 === 1 ? 'gemini' : 'groq';
     const ordered = [preferred, preferred === 'gemini' ? 'groq' : 'gemini'];
-
     return ordered.filter(provider => {
       const state = providerState[provider];
       state.usedTokens = state.usedTokens.filter(timestamp => timestamp > now - PROVIDER_WINDOW_MS);
@@ -326,7 +387,7 @@ export class AiPredictionService {
     const item = raw?.prediction || raw;
     if (!item || typeof item !== 'object') return null;
     const winner = this.stringOrNull(item.winner);
-    const allowedWinner = winner === fixture.home || winner === fixture.away ? winner : null;
+    const allowedWinner = winner === fixture.home || winner === fixture.away || winner === 'draw' ? winner : null;
     return {
       id: fixture.id,
       league: fixture.league,
@@ -360,18 +421,25 @@ export class AiPredictionService {
     };
   }
 
+  private mapHistoryRow(row: any): PredictionHistoryItem {
+    return {
+      ...this.mapRow(row),
+      actualHomeScore: row.actual_home_score == null ? null : Number(row.actual_home_score),
+      actualAwayScore: row.actual_away_score == null ? null : Number(row.actual_away_score),
+      predictionResult: row.prediction_result === 'true' || row.prediction_result === 'lose' || row.prediction_result === 'pending' ? row.prediction_result : null,
+      settledAt: row.settled_at ? new Date(row.settled_at).toISOString() : null,
+    };
+  }
+
   private rowToFixture(row: any): any {
     return {
-      id: String(row.id),
-      league: row.league_name,
-      home: row.home_team,
-      away: row.away_team,
-      kickoff: new Date(row.kickoff_at).toISOString(),
-      status: row.status,
-      raw: {
+      id: String(row.id), league: row.league_name, home: row.home_team, away: row.away_team,
+      kickoff: new Date(row.kickoff_at).toISOString(), status: row.status,
+      raw: row.raw_data || {
         fixture: { id: row.id, date: row.kickoff_at, status: { short: row.status } },
-        league: { name: row.league_name },
-        teams: { home: { name: row.home_team }, away: { name: row.away_team } },
+        league: { id: row.league_id, name: row.league_name, country: row.country, season: row.season },
+        teams: { home: { id: row.home_team_id, name: row.home_team }, away: { id: row.away_team_id, name: row.away_team } },
+        goals: { home: row.home_score, away: row.away_score },
       },
     };
   }
@@ -379,11 +447,7 @@ export class AiPredictionService {
   private compactObject(value: any): any {
     if (!value || typeof value !== 'object') return {};
     const output: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value).slice(0, 10)) {
-      if (entry === null || entry === undefined) continue;
-      if (typeof entry === 'object') output[key] = entry;
-      else output[key] = entry;
-    }
+    for (const [key, entry] of Object.entries(value).slice(0, 10)) output[key] = entry;
     return output;
   }
 
@@ -401,9 +465,9 @@ export class AiPredictionService {
   private normalizeFixture(item: any) {
     return {
       id: String(item.fixture?.id ?? item.id), leagueId: item.league?.id ? Number(item.league.id) : null,
-      league: item.league?.name || item.league_name || 'Football', country: item.league?.country || '', season: item.league?.season ? Number(item.league.season) : null,
-      homeId: item.teams?.home?.id ? Number(item.teams.home.id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home',
-      awayId: item.teams?.away?.id ? Number(item.teams.away.id) : null, away: item.teams?.away?.name || item.away_team || item.away || 'Away',
+      league: item.league?.name || item.league_name || 'Football', country: item.league?.country || item.country || '', season: item.league?.season ? Number(item.league.season) : item.season ? Number(item.season) : null,
+      homeId: item.teams?.home?.id ? Number(item.teams.home.id) : item.home_team_id ? Number(item.home_team_id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home',
+      awayId: item.teams?.away?.id ? Number(item.teams.away.id) : item.away_team_id ? Number(item.away_team_id) : null, away: item.teams?.away?.name || item.away_team || item.away || 'Away',
       kickoff: item.fixture?.date || item.kickoff_at || new Date().toISOString(), status: String(item.fixture?.status?.short || item.status || 'NS'),
       homeScore: this.toNumber(item.goals?.home ?? item.home_score), awayScore: this.toNumber(item.goals?.away ?? item.away_score),
     };
