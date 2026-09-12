@@ -101,35 +101,31 @@ export async function ensureDatabase(): Promise<void> {
   await sql`INSERT INTO bookmakers (key, title, active) VALUES ('superbet', 'Superbet', true), ('novibet', 'Novibet', true) ON CONFLICT (key) DO NOTHING`;
   await sql`INSERT INTO sports (key, title, description, active) VALUES ('soccer', 'Football', 'Football and soccer leagues', true) ON CONFLICT (key) DO NOTHING`;
 
-  // Older analysis cycles could persist placeholder metadata even when raw_data
-  // contained the original API-Football fixture. Repair those rows at startup so
-  // the dashboard never has to display "Home vs Away" or "Unknown league".
+  // Repair legacy placeholder metadata from the stored source payload. This
+  // runs on every startup so old 12-hour analysis rows are corrected as well.
   await sql`
     UPDATE football_fixtures
-    SET league_name = COALESCE(
-          NULLIF(BTRIM(league_name), ''),
-          NULLIF(raw_data->'league'->>'name', ''),
-          'Football'
-        ),
-        home_team = COALESCE(
-          NULLIF(BTRIM(home_team), ''),
-          NULLIF(raw_data->'teams'->'home'->>'name', ''),
-          'Home'
-        ),
-        away_team = COALESCE(
-          NULLIF(BTRIM(away_team), ''),
-          NULLIF(raw_data->'teams'->'away'->>'name', ''),
-          'Away'
-        ),
+    SET league_name = CASE
+          WHEN LOWER(BTRIM(league_name)) IN ('', 'unknown', 'unknown league', 'n/a', 'na')
+            THEN COALESCE(NULLIF(BTRIM(raw_data->'league'->>'name'), ''), 'Football')
+          ELSE league_name
+        END,
+        home_team = CASE
+          WHEN LOWER(BTRIM(home_team)) IN ('', 'home', 'unknown', 'n/a', 'na')
+            THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'home'->>'name'), ''), 'Home')
+          ELSE home_team
+        END,
+        away_team = CASE
+          WHEN LOWER(BTRIM(away_team)) IN ('', 'away', 'unknown', 'n/a', 'na')
+            THEN COALESCE(NULLIF(BTRIM(raw_data->'teams'->'away'->>'name'), ''), 'Away')
+          ELSE away_team
+        END,
         updated_at = NOW()
     WHERE raw_data IS NOT NULL
       AND (
-        LOWER(BTRIM(league_name)) IN ('unknown', 'unknown league', 'n/a', 'na')
-        OR LOWER(BTRIM(home_team)) IN ('home', 'unknown', 'n/a', 'na')
-        OR LOWER(BTRIM(away_team)) IN ('away', 'unknown', 'n/a', 'na')
-        OR BTRIM(league_name) = ''
-        OR BTRIM(home_team) = ''
-        OR BTRIM(away_team) = ''
+        LOWER(BTRIM(league_name)) IN ('', 'unknown', 'unknown league', 'n/a', 'na')
+        OR LOWER(BTRIM(home_team)) IN ('', 'home', 'unknown', 'n/a', 'na')
+        OR LOWER(BTRIM(away_team)) IN ('', 'away', 'unknown', 'n/a', 'na')
       )
   `;
 }
