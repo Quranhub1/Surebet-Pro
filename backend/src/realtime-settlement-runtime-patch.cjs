@@ -1,6 +1,28 @@
 const { realtimeSettlementService } = require('./services/RealtimeSettlementService');
 
+const isPlaceholder = value => {
+  const text = String(value ?? '').trim().toLowerCase();
+  return !text || ['home', 'away', 'home team', 'away team', 'unknown', 'unknown team', 'unknown league', 'tbd', 'n/a', 'na'].includes(text);
+};
+
 if (realtimeSettlementService && typeof realtimeSettlementService.getEventsForDate === 'function') {
+  // Never allow a placeholder fixture to enter the settlement queue. These rows
+  // are legacy/corrupt metadata and cannot be reliably matched to a result.
+  const originalSchedule = realtimeSettlementService.schedule;
+  realtimeSettlementService.schedule = function(row) {
+    if (isPlaceholder(row?.home_team) || isPlaceholder(row?.away_team)) {
+      const fixtureId = String(row?.fixture_id ?? '');
+      if (fixtureId && this.timers?.has(fixtureId)) {
+        clearTimeout(this.timers.get(fixtureId));
+        this.timers.delete(fixtureId);
+      }
+      this.retries?.delete(fixtureId);
+      console.warn(`[History] Skipping settlement for fixture ${fixtureId || 'unknown'} because team metadata is unresolved.`);
+      return;
+    }
+    return originalSchedule.call(this, row);
+  };
+
   // The date feed is already paginated and cached. Searching BSD once per team
   // creates a storm of 12-second requests and still often misses renamed teams.
   realtimeSettlementService.fetchFromBsd = async function(row, key) {
@@ -30,5 +52,5 @@ if (realtimeSettlementService && typeof realtimeSettlementService.getEventsForDa
     return best?.event || null;
   };
 
-  console.log('[History] BSD settlement runtime patch loaded: date-feed matching enabled and slow per-team searches disabled.');
+  console.log('[History] BSD settlement runtime patch loaded: date-feed matching enabled, slow per-team searches disabled, and placeholder jobs blocked.');
 }
