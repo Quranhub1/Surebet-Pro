@@ -2,12 +2,20 @@ import axios from 'axios';
 import { sql } from '../lib/db';
 
 const BSD_BASE_URL = 'https://sports.bzzoiro.com/api/v2';
-const SETTLEMENT_DELAY_MS = 135 * 60 * 1000;
-const RETRY_DELAY_MS = 10 * 60 * 1000;
-const MAX_RETRIES = 18;
+const SETTLEMENT_DELAY_MS = 105 * 60 * 1000;
+const RETRY_DELAY_MS = 5 * 60 * 1000;
+const MAX_RETRIES = 24;
 const DATE_CACHE_MS = 2 * 60 * 1000;
 
-type PendingMatch = { fixture_id: string; winner: string | null; home_team: string; away_team: string; kickoff_at: string };
+type PendingMatch = {
+  fixture_id: string;
+  winner: string | null;
+  predicted_home_goals: number | null;
+  predicted_away_goals: number | null;
+  home_team: string;
+  away_team: string;
+  kickoff_at: string;
+};
 type DateCache = { expiresAt: number; events: any[] };
 
 class RealtimeSettlementService {
@@ -32,7 +40,8 @@ class RealtimeSettlementService {
 
   public async refreshSchedules(): Promise<void> {
     const pending = await sql<PendingMatch[]>`
-      SELECT p.fixture_id, p.winner, f.home_team, f.away_team, f.kickoff_at
+      SELECT p.fixture_id, p.winner, p.predicted_home_goals, p.predicted_away_goals,
+             f.home_team, f.away_team, f.kickoff_at
       FROM football_ai_predictions p
       JOIN football_fixtures f ON f.id = p.fixture_id
       WHERE p.settled_at IS NULL
@@ -59,9 +68,8 @@ class RealtimeSettlementService {
     const kickoff = new Date(row.kickoff_at).getTime();
     const target = kickoff + SETTLEMENT_DELAY_MS;
     const delay = Math.max(5_000, target - Date.now());
-    this.timers.set(fixtureId, setTimeout(() => {
-      void this.checkFixture(row);
-    }, delay));
+    this.timers.set(fixtureId, setTimeout(() => void this.checkFixture(row), delay));
+    console.log(`[History] Scheduled result check for ${row.home_team} vs ${row.away_team} approximately 105 minutes after kickoff.`);
   }
 
   private async checkFixture(row: PendingMatch): Promise<void> {
@@ -75,7 +83,8 @@ class RealtimeSettlementService {
 
       if (['FT', 'AET', 'PEN'].includes(status) && homeScore !== null && awayScore !== null) {
         const actualWinner = homeScore > awayScore ? row.home_team : homeScore < awayScore ? row.away_team : 'draw';
-        const predictionResult = row.winner && row.winner === actualWinner ? 'true' : 'lose';
+        const predictedWinner = row.winner || this.winnerFromScore(row, row.predicted_home_goals, row.predicted_away_goals);
+        const predictionResult = predictedWinner && predictedWinner === actualWinner ? 'true' : 'lose';
         await sql`
           UPDATE football_fixtures
           SET status = ${status}, home_score = ${homeScore}, away_score = ${awayScore}, raw_data = ${JSON.stringify(fixture)}, updated_at = NOW()
@@ -94,7 +103,7 @@ class RealtimeSettlementService {
       this.retries.set(fixtureId, retry);
       if (retry <= MAX_RETRIES) {
         this.timers.set(fixtureId, setTimeout(() => void this.checkFixture(row), RETRY_DELAY_MS));
-        console.log(`[History] ${row.home_team} vs ${row.away_team} is not final yet. Retry ${retry}/${MAX_RETRIES} in 10 minutes.`);
+        console.log(`[History] ${row.home_team} vs ${row.away_team} is not final yet. Retry ${retry}/${MAX_RETRIES} in 5 minutes.`);
       } else {
         console.warn(`[History] Giving up active polling for ${row.home_team} vs ${row.away_team}; the next scheduler refresh will pick it up.`);
       }
@@ -104,6 +113,13 @@ class RealtimeSettlementService {
       if (retry <= MAX_RETRIES) this.timers.set(fixtureId, setTimeout(() => void this.checkFixture(row), RETRY_DELAY_MS));
       console.warn(`[History] Result refresh failed for ${row.home_team} vs ${row.away_team}:`, error instanceof Error ? error.message : error);
     }
+  }
+
+  private winnerFromScore(row: PendingMatch, homeGoals: number | null, awayGoals: number | null): string | null {
+    if (homeGoals === null || awayGoals === null) return null;
+    if (homeGoals > awayGoals) return row.home_team;
+    if (awayGoals > homeGoals) return row.away_team;
+    return 'draw';
   }
 
   private async fetchEvent(row: PendingMatch): Promise<any> {
