@@ -100,6 +100,38 @@ export async function ensureDatabase(): Promise<void> {
   await sql`INSERT INTO markets (key, title, description, active) VALUES ('h2h', 'Match Result', 'Home, draw and away result', true) ON CONFLICT (key) DO NOTHING`;
   await sql`INSERT INTO bookmakers (key, title, active) VALUES ('superbet', 'Superbet', true), ('novibet', 'Novibet', true) ON CONFLICT (key) DO NOTHING`;
   await sql`INSERT INTO sports (key, title, description, active) VALUES ('soccer', 'Football', 'Football and soccer leagues', true) ON CONFLICT (key) DO NOTHING`;
+
+  // Older analysis cycles could persist placeholder metadata even when raw_data
+  // contained the original API-Football fixture. Repair those rows at startup so
+  // the dashboard never has to display "Home vs Away" or "Unknown league".
+  await sql`
+    UPDATE football_fixtures
+    SET league_name = COALESCE(
+          NULLIF(BTRIM(league_name), ''),
+          NULLIF(raw_data->'league'->>'name', ''),
+          'Football'
+        ),
+        home_team = COALESCE(
+          NULLIF(BTRIM(home_team), ''),
+          NULLIF(raw_data->'teams'->'home'->>'name', ''),
+          'Home'
+        ),
+        away_team = COALESCE(
+          NULLIF(BTRIM(away_team), ''),
+          NULLIF(raw_data->'teams'->'away'->>'name', ''),
+          'Away'
+        ),
+        updated_at = NOW()
+    WHERE raw_data IS NOT NULL
+      AND (
+        LOWER(BTRIM(league_name)) IN ('unknown', 'unknown league', 'n/a', 'na')
+        OR LOWER(BTRIM(home_team)) IN ('home', 'unknown', 'n/a', 'na')
+        OR LOWER(BTRIM(away_team)) IN ('away', 'unknown', 'n/a', 'na')
+        OR BTRIM(league_name) = ''
+        OR BTRIM(home_team) = ''
+        OR BTRIM(away_team) = ''
+      )
+  `;
 }
 
 export function newId(): string { return randomUUID(); }
