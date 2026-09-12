@@ -40,9 +40,8 @@ export class ScannerScheduler {
       const rows = await sql`SELECT analysis_last_run_at, analysis_last_run_status FROM system_settings WHERE id = 1`;
       const data = rows[0];
       const lastRunAt = data?.analysis_last_run_at ? new Date(data.analysis_last_run_at).getTime() : 0;
-      const activeFixtures = await sql`SELECT COUNT(*)::int AS count FROM football_fixtures WHERE analysis_expires_at > NOW()`;
-      const resumable = Number(activeFixtures[0]?.count || 0) > 0;
-      if (data?.analysis_last_run_status === 'running' || resumable || !lastRunAt || Date.now() - lastRunAt >= ANALYSIS_INTERVAL_MS) {
+      const resumableRun = data?.analysis_last_run_status === 'running';
+      if (resumableRun || !lastRunAt || Date.now() - lastRunAt >= ANALYSIS_INTERVAL_MS) {
         await this.executeAnalysis();
       } else {
         console.log(`[AI] Previous analysis is current. Next regeneration is due in approximately ${((ANALYSIS_INTERVAL_MS - (Date.now() - lastRunAt)) / 3600000).toFixed(1)} hours.`);
