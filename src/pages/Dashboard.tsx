@@ -23,10 +23,13 @@ export function Dashboard() {
     if (manual) setRefreshing(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/football/predictions`);
+      const response = await fetch(`${API_BASE_URL}/api/football/predictions?ts=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Prediction feed returned ${response.status}`);
       const payload = await response.json();
-      setPredictions(Array.isArray(payload.predictions) ? payload.predictions : []);
+      const completed = Array.isArray(payload.predictions)
+        ? payload.predictions.filter((prediction: MatchPrediction) => Boolean(prediction.aiProvider || prediction.analysis || prediction.advice))
+        : [];
+      setPredictions(completed);
       setUpdatedAt(payload.updatedAt || new Date().toISOString());
       setRunningAnalysis(Boolean(payload.running));
     } catch (err) {
@@ -42,7 +45,7 @@ export function Dashboard() {
     setRunningAnalysis(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/football/analyze-now`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const response = await fetch(`${API_BASE_URL}/api/football/analyze-now`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `Analysis request returned ${response.status}`);
       await fetchPredictions();
@@ -61,7 +64,7 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!runningAnalysis) return;
-    const timer = window.setInterval(() => fetchPredictions(), 5_000);
+    const timer = window.setInterval(() => fetchPredictions(), 2_000);
     return () => window.clearInterval(timer);
   }, [runningAnalysis]);
 
@@ -89,9 +92,9 @@ export function Dashboard() {
           <div className="px-5 py-4 border-b border-[#2c2e33] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center justify-center"><Target className="w-5 h-5 text-[#39FF14]" /></div>
-              <div><h2 className="text-lg font-bold">Upcoming Match Predictions <span className="text-[#8b8d93] text-sm">({predictions.length}/40)</span></h2><p className="text-xs text-[#8b8d93]">Games are published immediately and their AI analysis fills in progressively in batches.</p></div>
+              <div><h2 className="text-lg font-bold">Upcoming Match Predictions <span className="text-[#8b8d93] text-sm">({predictions.length}/40)</span></h2><p className="text-xs text-[#8b8d93]">Each match appears as soon as its AI analysis is completed. No need to wait for all 40.</p></div>
             </div>
-            <div className="text-xs text-[#8b8d93]">{runningAnalysis ? 'Generating analysis progressively...' : updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString()}` : 'Waiting for analysis...'}</div>
+            <div className="text-xs text-[#8b8d93]">{runningAnalysis ? 'Generating and publishing matches progressively...' : updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString()}` : 'Waiting for analysis...'}</div>
           </div>
 
           {loading ? (
@@ -99,21 +102,16 @@ export function Dashboard() {
           ) : error ? (
             <div className="p-10 text-center"><p className="text-red-300 text-sm mb-4">{error}</p><button type="button" onClick={runAnalysisNow} disabled={runningAnalysis} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2 text-sm font-bold disabled:opacity-50"><Play className="w-4 h-4" />Try analysis again</button></div>
           ) : predictions.length === 0 ? (
-            <div className="p-10 text-center"><BrainCircuit className="w-10 h-10 text-[#555] mx-auto mb-3" /><p className="text-white font-semibold mb-1">No football games available yet</p><p className="text-sm text-[#8b8d93] mb-5">Run the analysis to fetch and publish up to 40 upcoming fixtures.</p><button type="button" onClick={runAnalysisNow} disabled={runningAnalysis} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2.5 text-sm font-bold disabled:opacity-50"><Play className="w-4 h-4" />{runningAnalysis ? 'Analysis running...' : 'Run analysis now'}</button></div>
+            <div className="p-10 text-center"><BrainCircuit className="w-10 h-10 text-[#555] mx-auto mb-3" /><p className="text-white font-semibold mb-1">No completed football analyses yet</p><p className="text-sm text-[#8b8d93] mb-5">The first completed match will appear here immediately, while the remaining games continue processing.</p><button type="button" onClick={runAnalysisNow} disabled={runningAnalysis} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2.5 text-sm font-bold disabled:opacity-50"><Play className="w-4 h-4" />{runningAnalysis ? 'Analysis running...' : 'Run analysis now'}</button></div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-[#2c2e33]">
-              {predictions.map((prediction) => {
-                const pending = !prediction.analysis && !prediction.winner;
-                return <article key={prediction.id} className="bg-[#111113] p-6 hover:bg-[#171719] transition-colors">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-5"><div><p className="text-[11px] uppercase tracking-wider text-[#8b8d93] mb-1">{prediction.league}</p><h3 className="text-lg font-bold">{prediction.homeTeam} <span className="text-[#555]">vs</span> {prediction.awayTeam}</h3></div><time className="text-xs text-[#8b8d93] whitespace-nowrap">{new Date(prediction.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></div>
-                  {pending ? <div className="rounded-xl border border-[#2c2e33] bg-[#161618] p-4 mb-4 flex items-center gap-3"><Loader2 className="w-4 h-4 animate-spin text-[#39FF14]" /><div><p className="text-sm font-bold">Analysis pending</p><p className="text-xs text-[#8b8d93]">This game has been fetched and is waiting for its AI batch.</p></div></div> : <>
-                    <div className="grid grid-cols-3 gap-2 mb-5">{[['Home', prediction.homeWin], ['Draw', prediction.draw], ['Away', prediction.awayWin]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#2c2e33] bg-[#161618] p-3 text-center"><p className="text-[10px] uppercase tracking-wide text-[#8b8d93] mb-1">{label}</p><p className="text-xl font-extrabold">{formatProbability(value as number | null)}</p></div>)}</div>
-                    <div className="rounded-xl border border-[#39FF14]/20 bg-[#39FF14]/5 p-4 mb-4"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">AI prediction</p><p className="text-xl font-extrabold text-[#39FF14]">{prediction.winner || 'Too close to call'}</p></div>{prediction.confidence !== null && <div className="text-right"><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">Confidence</p><p className="text-lg font-extrabold text-white">{prediction.confidence.toFixed(0)}%</p></div>}</div>{prediction.predictedHomeGoals !== null && prediction.predictedAwayGoals !== null && <p className="text-xs text-[#b7b9bf] mt-2">Expected score: <span className="text-white font-semibold">{prediction.predictedHomeGoals} - {prediction.predictedAwayGoals}</span></p>}{prediction.underOver && <p className="text-xs text-[#b7b9bf] mt-1">Goal outlook: <span className="text-white font-semibold">{prediction.underOver}</span></p>}</div>
-                    <div className="rounded-xl border border-[#2c2e33] bg-[#0d0d0f] p-4"><div className="flex items-center gap-2 mb-2"><BrainCircuit className="w-4 h-4 text-[#39FF14]" /><p className="text-xs font-bold uppercase tracking-wide">AI reasoning</p></div><p className="text-sm leading-6 text-[#c4c6cb]">{prediction.analysis || prediction.advice || 'The AI did not return a detailed explanation for this fixture.'}</p>{prediction.advice && prediction.analysis && prediction.advice !== prediction.analysis && <p className="text-xs text-[#8b8d93] mt-3 italic">{prediction.advice}</p>}{prediction.keyFactors.length > 0 && <div className="mt-4"><p className="text-[10px] uppercase tracking-wider text-[#6f727a] mb-2">Key factors</p><ul className="space-y-1.5">{prediction.keyFactors.map((factor, index) => <li key={`${prediction.id}-factor-${index}`} className="text-xs text-[#b7b9bf] flex gap-2"><span className="text-[#39FF14]">•</span><span>{factor}</span></li>)}</ul></div>}</div>
-                  </>}
-                  <div className="mt-4 pt-3 border-t border-[#2c2e33] flex items-center justify-between gap-3 text-[10px] text-[#6f727a]"><span>{formatProvider(prediction.aiProvider)}{prediction.aiModel ? ` · ${prediction.aiModel}` : ''}</span><span>{pending ? 'Fixture fetched' : 'AI analysis only'}</span></div>
-                </article>;
-              })}
+              {predictions.map((prediction) => <article key={prediction.id} className="bg-[#111113] p-6 hover:bg-[#171719] transition-colors">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-5"><div><p className="text-[11px] uppercase tracking-wider text-[#8b8d93] mb-1">{prediction.league}</p><h3 className="text-lg font-bold">{prediction.homeTeam} <span className="text-[#555]">vs</span> {prediction.awayTeam}</h3></div><time className="text-xs text-[#8b8d93] whitespace-nowrap">{new Date(prediction.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></div>
+                <div className="grid grid-cols-3 gap-2 mb-5">{[['Home', prediction.homeWin], ['Draw', prediction.draw], ['Away', prediction.awayWin]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#2c2e33] bg-[#161618] p-3 text-center"><p className="text-[10px] uppercase tracking-wide text-[#8b8d93] mb-1">{label}</p><p className="text-xl font-extrabold">{formatProbability(value as number | null)}</p></div>)}</div>
+                <div className="rounded-xl border border-[#39FF14]/20 bg-[#39FF14]/5 p-4 mb-4"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">AI prediction</p><p className="text-xl font-extrabold text-[#39FF14]">{prediction.winner || 'Too close to call'}</p></div>{prediction.confidence !== null && <div className="text-right"><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">Confidence</p><p className="text-lg font-extrabold text-white">{prediction.confidence.toFixed(0)}%</p></div>}</div>{prediction.predictedHomeGoals !== null && prediction.predictedAwayGoals !== null && <p className="text-xs text-[#b7b9bf] mt-2">Expected score: <span className="text-white font-semibold">{prediction.predictedHomeGoals} - {prediction.predictedAwayGoals}</span></p>}{prediction.underOver && <p className="text-xs text-[#b7b9bf] mt-1">Goal outlook: <span className="text-white font-semibold">{prediction.underOver}</span></p>}</div>
+                <div className="rounded-xl border border-[#2c2e33] bg-[#0d0d0f] p-4"><div className="flex items-center gap-2 mb-2"><BrainCircuit className="w-4 h-4 text-[#39FF14]" /><p className="text-xs font-bold uppercase tracking-wide">AI reasoning</p></div><p className="text-sm leading-6 text-[#c4c6cb]">{prediction.analysis || prediction.advice || 'The AI did not return a detailed explanation for this fixture.'}</p>{prediction.advice && prediction.analysis && prediction.advice !== prediction.analysis && <p className="text-xs text-[#8b8d93] mt-3 italic">{prediction.advice}</p>}{prediction.keyFactors.length > 0 && <div className="mt-4"><p className="text-[10px] uppercase tracking-wider text-[#6f727a] mb-2">Key factors</p><ul className="space-y-1.5">{prediction.keyFactors.map((factor, index) => <li key={`${prediction.id}-factor-${index}`} className="text-xs text-[#b7b9bf] flex gap-2"><span className="text-[#39FF14]">•</span><span>{factor}</span></li>)}</ul></div>}</div>
+                <div className="mt-4 pt-3 border-t border-[#2c2e33] flex items-center justify-between gap-3 text-[10px] text-[#6f727a]"><span>{formatProvider(prediction.aiProvider)}{prediction.aiModel ? ` · ${prediction.aiModel}` : ''}</span><span>AI analysis complete</span></div>
+              </article>)}
             </div>
           )}
         </section>
