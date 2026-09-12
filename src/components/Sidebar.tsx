@@ -1,10 +1,13 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, LogOut, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Activity, History, LogOut, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
 
-const navItems = [{ icon: Activity, label: 'Game Analysis', path: '/' }];
+const navItems = [
+  { icon: Activity, label: 'Game Analysis', path: '/' },
+  { icon: History, label: 'History', path: '/history' },
+];
 
 interface SidebarProps {
   collapsed: boolean;
