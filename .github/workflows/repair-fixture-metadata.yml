@@ -1,0 +1,173 @@
+name: Repair fixture metadata and AI routing
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'fix: repair fixture metadata') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch service
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path('backend/src/services/AiPredictionService.ts')
+          s = p.read_text()
+
+          old = """  private normalizeFixture(item: any) { return { id: String(item.fixture?.id ?? item.id), leagueId: item.league?.id ? Number(item.league.id) : null, league: item.league?.name || item.league_name || 'Football', country: item.league?.country || item.country || '', season: item.league?.season ? Number(item.league.season) : item.season ? Number(item.season) : null, homeId: item.teams?.home?.id ? Number(item.teams.home.id) : item.home_team_id ? Number(item.home_team_id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home', awayId: item.teams?.away?.id ? Number(item.teams.away.id) : item.away_team_id ? Number(item.away_team_id) : null, away: item.teams?.away?.name || item.away || item.away_team || 'Away', kickoff: item.fixture?.date || item.kickoff_at || new Date().toISOString(), status: String(item.fixture?.status?.short || item.status || 'NS'), homeScore: this.toNumber(item.goals?.home ?? item.home_score), awayScore: this.toNumber(item.goals?.away ?? item.away_score) }; }\n"""
+          if old not in s:
+              old = """  private normalizeFixture(item: any) { return { id: String(item.fixture?.id ?? item.id), leagueId: item.league?.id ? Number(item.league.id) : null, league: item.league?.name || item.league_name || 'Football', country: item.league?.country || item.country || '', season: item.league?.season ? Number(item.league.season) : item.season ? Number(item.season) : null, homeId: item.teams?.home?.id ? Number(item.teams.home.id) : item.home_team_id ? Number(item.home_team_id) : null, home: item.teams?.home?.name || item.home_team || item.home || 'Home', awayId: item.teams?.away?.id ? Number(item.teams.away.id) : item.away_team_id ? Number(item.away_team_id) : null, away: item.teams?.away?.name || item.away_team || item.away || 'Away', kickoff: item.fixture?.date || item.kickoff_at || new Date().toISOString(), status: String(item.fixture?.status?.short || item.status || 'NS'), homeScore: this.toNumber(item.goals?.home ?? item.home_score), awayScore: this.toNumber(item.goals?.away ?? item.away_score) }; }\n"""
+          new = r'''  private isPlaceholderTeam(value: unknown): boolean {
+    const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return !text || ['home', 'away', 'home team', 'away team', 'team home', 'team away', 'tbd', 'unknown', 'n/a', 'null'].includes(text);
+  }
+
+  private extractText(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim() && !this.isPlaceholderTeam(value)) return value.trim();
+    if (value && typeof value === 'object') {
+      const obj = value as any;
+      for (const key of ['name', 'teamName', 'team_name', 'displayName', 'title', 'shortName']) {
+        if (typeof obj[key] === 'string' && obj[key].trim() && !this.isPlaceholderTeam(obj[key])) return obj[key].trim();
+      }
+    }
+    return null;
+  }
+
+  private findFixtureValue(root: any, keys: string[], maxDepth = 7): unknown {
+    const seen = new Set<any>();
+    const visit = (node: any, depth: number): unknown => {
+      if (!node || typeof node !== 'object' || depth > maxDepth || seen.has(node)) return undefined;
+      seen.add(node);
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(node, key)) {
+          const value = this.extractText(node[key]);
+          if (value) return value;
+        }
+      }
+      for (const value of Object.values(node)) {
+        const found = visit(value, depth + 1);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    return visit(root, 0);
+  }
+
+  private parseFixtureInput(item: any): any {
+    if (typeof item === 'string') {
+      try { return JSON.parse(item); } catch { return {}; }
+    }
+    return item || {};
+  }
+
+  private normalizeFixture(item: any) {
+    const root = this.parseFixtureInput(item);
+    const homeObj = root.teams?.home || root.fixture?.teams?.home || root.homeTeam || root.home_team || root.home?.team || root.event?.homeTeam || root.event?.home || {};
+    const awayObj = root.teams?.away || root.fixture?.teams?.away || root.awayTeam || root.away_team || root.away?.team || root.event?.awayTeam || root.event?.away || {};
+    const home = this.extractText(homeObj) || this.findFixtureValue(root, ['home_team_name', 'homeTeamName', 'home_team', 'homeTeam', 'home']) || null;
+    const away = this.extractText(awayObj) || this.findFixtureValue(root, ['away_team_name', 'awayTeamName', 'away_team', 'awayTeam', 'away']) || null;
+    const leagueObj = root.league || root.fixture?.league || root.competition || root.tournament || root.event?.league || {};
+    const league = this.extractText(leagueObj) || this.findFixtureValue(root, ['league_name', 'leagueName', 'competition_name', 'competitionName', 'tournament_name', 'tournamentName', 'league', 'competition', 'tournament']) || null;
+    const id = String(root.fixture?.id ?? root.fixture_id ?? root.match_id ?? root.event_id ?? root.id ?? '').trim();
+    const homeId = Number(homeObj?.id ?? root.home_team_id ?? root.homeTeamId ?? 0) || null;
+    const awayId = Number(awayObj?.id ?? root.away_team_id ?? root.awayTeamId ?? 0) || null;
+    const leagueId = Number(leagueObj?.id ?? root.league_id ?? root.leagueId ?? 0) || null;
+    const seasonValue = leagueObj?.season ?? root.season;
+    const kickoff = root.fixture?.date || root.kickoff_at || root.kickoff || root.startTime || root.start_time || root.event?.startTime || new Date().toISOString();
+    const status = String(root.fixture?.status?.short || root.status?.short || root.status || 'NS');
+    if (!id || !home || !away || !league) console.warn(`[AI] Invalid fixture metadata: id=${id || 'missing'} home=${home || 'missing'} away=${away || 'missing'} league=${league || 'missing'}`);
+    return {
+      id,
+      leagueId,
+      league: league || 'Football',
+      country: leagueObj?.country || root.country || root.league_country || '',
+      season: seasonValue ? Number(seasonValue) : null,
+      homeId,
+      home: home || 'Home',
+      awayId,
+      away: away || 'Away',
+      kickoff,
+      status,
+      homeScore: this.toNumber(root.goals?.home ?? root.home_score),
+      awayScore: this.toNumber(root.goals?.away ?? root.away_score),
+    };
+  }
+'''
+          if old not in s:
+              raise SystemExit('normalizeFixture source not found')
+          s = s.replace(old, new)
+
+          old_rank = """  private rankProviders(position: number, estimatedTokens: number): AiProvider[] {\n    const configured = getAiModels().filter(item => item.configured).map(item => item.provider);\n    const now = Date.now();\n    if (configured.length <= 1) return configured;\n    const preferred: AiProvider = position % 2 === 1 ? 'gemini' : 'groq';\n    const ordered = [preferred, preferred === 'gemini' ? 'groq' : 'gemini'];\n    return ordered.filter(provider => {\n      const state = providerState[provider];\n      state.usedTokens = state.usedTokens.filter(timestamp => timestamp > now - PROVIDER_WINDOW_MS);\n      const projected = state.usedTokens.length * 0 + estimatedTokens;\n      const withinBudget = projected <= PROVIDER_BUDGETS[provider];\n      const available = state.cooldownUntil <= now;\n      return configured.includes(provider) && (withinBudget || provider === ordered[1]) && available;\n    });\n  }\n"""
+          new_rank = r'''  private rankProviders(position: number, estimatedTokens: number): AiProvider[] {
+    const configured = getAiModels().filter(item => item.configured).map(item => item.provider);
+    if (configured.length <= 1) return configured;
+    const preferred: AiProvider = position % 2 === 1 ? 'gemini' : 'groq';
+    const alternate: AiProvider = preferred === 'gemini' ? 'groq' : 'gemini';
+    const now = Date.now();
+    const canUse = (provider: AiProvider) => {
+      if (!configured.includes(provider)) return false;
+      const state = providerState[provider];
+      state.usedTokens = state.usedTokens.filter(timestamp => timestamp > now - PROVIDER_WINDOW_MS);
+      const withinBudget = state.usedTokens.length * estimatedTokens < PROVIDER_BUDGETS[provider];
+      return state.cooldownUntil <= now && withinBudget;
+    };
+    const ordered = [preferred, alternate].filter(canUse);
+    console.log(`[AI] Provider routing game ${position}: preferred=${preferred.toUpperCase()} available=${canUse(preferred)} fallback=${alternate.toUpperCase()} available=${canUse(alternate)}`);
+    return ordered;
+  }
+'''
+          if old_rank not in s: raise SystemExit('rankProviders source not found')
+          s = s.replace(old_rank, new_rank)
+
+          old_loop = """    const providers = this.rankProviders(position, estimatedTokens);\n    let lastError: unknown = null;\n\n    for (const provider of providers) {\n"""
+          new_loop = r'''    let providers = this.rankProviders(position, estimatedTokens);
+    const preferred: AiProvider = position % 2 === 1 ? 'gemini' : 'groq';
+    if (!providers.includes(preferred) && getAiModels().some(model => model.provider === preferred && model.configured)) {
+      const state = providerState[preferred];
+      const now = Date.now();
+      state.usedTokens = state.usedTokens.filter(timestamp => timestamp > now - PROVIDER_WINDOW_MS);
+      const oldest = state.usedTokens[0];
+      const waitMs = Math.max(0, Math.min(15_000, oldest ? oldest + PROVIDER_WINDOW_MS - now + 100 : 0));
+      if (waitMs > 0) {
+        console.log(`[AI] ${preferred.toUpperCase()} rate window is full. Waiting ${Math.ceil(waitMs / 1000)}s instead of silently routing the game to the other provider.`);
+        await this.sleep(waitMs);
+        providers = this.rankProviders(position, estimatedTokens);
+      }
+    }
+    let lastError: unknown = null;
+
+    for (const provider of providers) {
+'''
+          if old_loop not in s: raise SystemExit('provider loop source not found')
+          s = s.replace(old_loop, new_loop)
+
+          old_base = """      const base = this.normalizeFixture(fixture.raw || fixture);\n      console.log(`[AI] Processing game ${index + 1}/${selected.length}: ${base.home} vs ${base.away} (fixture ${base.id})`);\n\n      const existingPrediction = await this.getValidPrediction(base.id);\n"""
+          new_base = r'''      const base = this.normalizeFixture(fixture.raw || fixture);
+      if (!base.id || !base.home || !base.away || this.isPlaceholderTeam(base.home) || this.isPlaceholderTeam(base.away) || !base.league || base.league === 'Football') {
+        console.warn(`[AI] Skipping fixture ${base.id || 'unknown'} because real team/league metadata is missing. No Home vs Away placeholder will be published.`);
+        continue;
+      }
+      console.log(`[AI] Processing game ${index + 1}/${selected.length}: ${base.home} vs ${base.away} | ${base.league} (fixture ${base.id})`);
+
+      const existingPrediction = await this.getValidPrediction(base.id);
+'''
+          if old_base not in s: raise SystemExit('base source not found')
+          s = s.replace(old_base, new_base)
+
+          p.write_text(s)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/services/AiPredictionService.ts
+          git commit -m "fix: repair fixture metadata and AI routing" || exit 0
+          git push origin HEAD:main
