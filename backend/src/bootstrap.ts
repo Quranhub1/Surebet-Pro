@@ -1,5 +1,6 @@
 import './fixture-metadata-runtime-patch.cjs';
 import './fixture-display-repair-runtime.cjs';
+import './realtime-settlement-runtime-patch.cjs';
 import './index.ts';
 
 setTimeout(() => {
