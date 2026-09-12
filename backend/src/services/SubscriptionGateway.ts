@@ -54,34 +54,74 @@ async function requireAdmin(req: express.Request, res: express.Response): Promis
   return userId;
 }
 
-function registerRoutes(app: express.Application): void {
-  app.get('/api/subscription', async (req, res) => { const userId = sessionUserId(req); if (!userId) return res.status(401).json({ ok: false, error: 'Authentication required' }); try { const admin = await isAdmin(userId); const state = await subscriptionState(userId); res.json({ ok: true, isAdmin: admin, subscription: state }); } catch (error) { console.error('[Subscription] State lookup failed:', error); res.status(503).json({ ok: false, error: 'Failed to load subscription status' }); } });
-  app.post('/api/subscription/request', async (req, res) => { const userId = sessionUserId(req); if (!userId) return res.status(401).json({ ok: false, error: 'Authentication required' }); try { if (await isAdmin(userId)) return res.json({ ok: true, isAdmin: true }); await subscriptionState(userId); await sql`UPDATE users SET subscription_status = 'pending', subscription_requested_at = NOW() WHERE id = ${userId}`; const state = await subscriptionState(userId); res.json({ ok: true, subscription: state, message: 'Payment marked as submitted. An administrator must verify the payment before the 7-day subscription is activated.' }); } catch (error) { console.error('[Subscription] Payment request failed:', error); res.status(500).json({ ok: false, error: 'Could not submit payment request' }); } });
-  app.get('/api/admin/subscriptions/users', async (req, res) => { if (!await requireAdmin(req, res)) return; try { const rows = await sql`SELECT id, email, name, role, trial_started_at, subscription_status, subscription_expires_at, subscription_requested_at FROM users ORDER BY CASE WHEN subscription_status = 'pending' THEN 0 ELSE 1 END, subscription_requested_at DESC NULLS LAST, email ASC`; res.json({ ok: true, users: rows.map((row: any) => ({ id: String(row.id), email: String(row.email), name: String(row.name || ''), role: String(row.role || 'USER'), trialStartedAt: row.trial_started_at ? new Date(row.trial_started_at).toISOString() : null, subscriptionStatus: String(row.subscription_status || 'inactive'), subscriptionExpiresAt: row.subscription_expires_at ? new Date(row.subscription_expires_at).toISOString() : null, paymentRequestedAt: row.subscription_requested_at ? new Date(row.subscription_requested_at).toISOString() : null })) }); } catch (error) { console.error('[Admin] User subscription list failed:', error); res.status(500).json({ ok: false, error: 'Failed to load users' }); } });
-  app.post('/api/admin/subscriptions/:userId/approve', async (req, res) => { if (!await requireAdmin(req, res)) return; try { const rows = await sql`UPDATE users SET subscription_status = 'active', subscription_expires_at = GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + INTERVAL '7 days', subscription_requested_at = NULL WHERE id = ${req.params.userId} RETURNING id, email, subscription_status, subscription_expires_at`; if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' }); res.json({ ok: true, user: { id: String(rows[0].id), email: String(rows[0].email), subscriptionStatus: String(rows[0].subscription_status), subscriptionExpiresAt: new Date(rows[0].subscription_expires_at).toISOString() } }); } catch (error) { console.error('[Admin] Subscription approval failed:', error); res.status(500).json({ ok: false, error: 'Failed to approve subscription' }); } });
-  app.post('/api/admin/subscriptions/:userId/revoke', async (req, res) => { if (!await requireAdmin(req, res)) return; try { const rows = await sql`UPDATE users SET subscription_status = 'inactive', subscription_expires_at = NULL, subscription_requested_at = NULL WHERE id = ${req.params.userId} RETURNING id, email, subscription_status`; if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' }); res.json({ ok: true, user: { id: String(rows[0].id), email: String(rows[0].email), subscriptionStatus: String(rows[0].subscription_status) } }); } catch (error) { console.error('[Admin] Subscription revoke failed:', error); res.status(500).json({ ok: false, error: 'Failed to revoke subscription' }); } });
-}
+export const subscriptionRouter = express.Router();
+
+subscriptionRouter.get('/api/subscription', async (req, res) => {
+  const userId = sessionUserId(req);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Authentication required' });
+  try {
+    const admin = await isAdmin(userId);
+    const state = await subscriptionState(userId);
+    return res.json({ ok: true, isAdmin: admin, subscription: state });
+  } catch (error) {
+    console.error('[Subscription] State lookup failed:', error);
+    return res.status(503).json({ ok: false, error: 'Failed to load subscription status' });
+  }
+});
+
+subscriptionRouter.post('/api/subscription/request', async (req, res) => {
+  const userId = sessionUserId(req);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Authentication required' });
+  try {
+    if (await isAdmin(userId)) return res.json({ ok: true, isAdmin: true });
+    await subscriptionState(userId);
+    await sql`UPDATE users SET subscription_status = 'pending', subscription_requested_at = NOW() WHERE id = ${userId}`;
+    const state = await subscriptionState(userId);
+    return res.json({ ok: true, subscription: state, message: 'Payment marked as submitted. An administrator must verify the payment before the 7-day subscription is activated.' });
+  } catch (error) {
+    console.error('[Subscription] Payment request failed:', error);
+    return res.status(500).json({ ok: false, error: 'Could not submit payment request' });
+  }
+});
+
+subscriptionRouter.get('/api/admin/subscriptions/users', async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const rows = await sql`SELECT id, email, name, role, trial_started_at, subscription_status, subscription_expires_at, subscription_requested_at FROM users ORDER BY CASE WHEN subscription_status = 'pending' THEN 0 ELSE 1 END, subscription_requested_at DESC NULLS LAST, email ASC`;
+    return res.json({ ok: true, users: rows.map((row: any) => ({ id: String(row.id), email: String(row.email), name: String(row.name || ''), role: String(row.role || 'USER'), trialStartedAt: row.trial_started_at ? new Date(row.trial_started_at).toISOString() : null, subscriptionStatus: String(row.subscription_status || 'inactive'), subscriptionExpiresAt: row.subscription_expires_at ? new Date(row.subscription_expires_at).toISOString() : null, paymentRequestedAt: row.subscription_requested_at ? new Date(row.subscription_requested_at).toISOString() : null })) });
+  } catch (error) { console.error('[Admin] User subscription list failed:', error); return res.status(500).json({ ok: false, error: 'Failed to load users' }); }
+});
+
+subscriptionRouter.post('/api/admin/subscriptions/:userId/approve', async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const rows = await sql`UPDATE users SET subscription_status = 'active', subscription_expires_at = GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + INTERVAL '7 days', subscription_requested_at = NULL WHERE id = ${req.params.userId} RETURNING id, email, subscription_status, subscription_expires_at`;
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    return res.json({ ok: true, user: { id: String(rows[0].id), email: String(rows[0].email), subscriptionStatus: String(rows[0].subscription_status), subscriptionExpiresAt: new Date(rows[0].subscription_expires_at).toISOString() } });
+  } catch (error) { console.error('[Admin] Subscription approval failed:', error); return res.status(500).json({ ok: false, error: 'Failed to approve subscription' }); }
+});
+
+subscriptionRouter.post('/api/admin/subscriptions/:userId/revoke', async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const rows = await sql`UPDATE users SET subscription_status = 'inactive', subscription_expires_at = NULL, subscription_requested_at = NULL WHERE id = ${req.params.userId} RETURNING id, email, subscription_status`;
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    return res.json({ ok: true, user: { id: String(rows[0].id), email: String(rows[0].email), subscriptionStatus: String(rows[0].subscription_status) } });
+  } catch (error) { console.error('[Admin] Subscription revoke failed:', error); return res.status(500).json({ ok: false, error: 'Failed to revoke subscription' }); }
+});
 
 let installed = false;
 export function installSubscriptionGateway(): void {
   if (installed) return;
   installed = true;
   const proto = express.application as any;
-  for (const method of ['get', 'post', 'patch', 'delete', 'put']) { const original = proto[method]; proto[method] = function patchedRoute(path: any, ...handlers: any[]) { if (typeof path === 'string' && path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !path.startsWith('/api/admin/')) return original.call(this, path, requireAppSubscription, ...handlers); return original.call(this, path, ...handlers); }; }
-  const originalListen = proto.listen;
-  proto.listen = function patchedListen(...args: any[]) {
-    if (!this.__surebetSubscriptionRoutesInstalled) {
-      const router = this._router;
-      const before = Array.isArray(router?.stack) ? router.stack.length : 0;
-      registerRoutes(this);
-      if (router?.stack && router.stack.length > before) {
-        const added = router.stack.splice(before);
-        router.stack.unshift(...added);
-      }
-      this.__surebetSubscriptionRoutesInstalled = true;
-    }
-    return originalListen.apply(this, args);
-  };
+  for (const method of ['get', 'post', 'patch', 'delete', 'put']) {
+    const original = proto[method];
+    proto[method] = function patchedRoute(path: any, ...handlers: any[]) {
+      if (typeof path === 'string' && path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !path.startsWith('/api/admin/')) return original.call(this, path, requireAppSubscription, ...handlers);
+      return original.call(this, path, ...handlers);
+    };
+  }
 }
 
 export { ensureUserSubscriptionColumns };
