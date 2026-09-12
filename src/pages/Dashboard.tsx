@@ -1,129 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { BrainCircuit, Loader2, RefreshCw, Target, Play } from 'lucide-react';
+import { getAuthToken } from '../contexts/AuthContext';
 
-interface MatchPrediction {
-  id: string; league: string; homeTeam: string; awayTeam: string; startTime: string;
-  winner: string | null; advice: string | null; analysis: string | null; keyFactors: string[];
-  confidence: number | null; homeWin: number | null; draw: number | null; awayWin: number | null;
-  underOver: string | null; predictedHomeGoals: number | null; predictedAwayGoals: number | null;
-  aiProvider: 'gemini' | 'groq' | null; aiModel: string | null;
-}
-
+interface MatchPrediction { id: string; league: string; homeTeam: string; awayTeam: string; startTime: string; winner: string | null; advice: string | null; analysis: string | null; keyFactors: string[]; confidence: number | null; homeWin: number | null; draw: number | null; awayWin: number | null; underOver: string | null; predictedHomeGoals: number | null; predictedAwayGoals: number | null; aiProvider: 'gemini' | 'groq' | null; aiModel: string | null; }
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const authHeaders = () => ({ Authorization: `Bearer ${getAuthToken() || ''}` });
 
 export function Dashboard() {
-  const [predictions, setPredictions] = useState<MatchPrediction[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [runningAnalysis, setRunningAnalysis] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchPredictions = async (manual = false) => {
-    if (manual) setRefreshing(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/football/predictions?ts=${Date.now()}`, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`Prediction feed returned ${response.status}`);
-      const payload = await response.json();
-      // IMPORTANT: keep every fixture returned by the API, including fixtures whose AI analysis is still pending.
-      setPredictions(Array.isArray(payload.predictions) ? payload.predictions : []);
-      setUpdatedAt(payload.updatedAt || new Date().toISOString());
-      setRunningAnalysis(Boolean(payload.running));
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching AI match predictions:', err);
-      setError('The AI prediction service is temporarily unavailable.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const runAnalysisNow = async () => {
-    setRunningAnalysis(true);
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/football/analyze-now?ts=${Date.now()}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store'
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || `Analysis request returned ${response.status}`);
-      // The API publishes fixtures before analysis starts, so fetch immediately. Polling below keeps it live.
-      await fetchPredictions();
-    } catch (err) {
-      console.error('Error starting AI football analysis:', err);
-      setError(err instanceof Error ? err.message : 'Manual football analysis failed.');
-      setRunningAnalysis(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPredictions();
-    const timer = window.setInterval(() => fetchPredictions(), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!runningAnalysis) return;
-    const timer = window.setInterval(() => fetchPredictions(), 2_000);
-    return () => window.clearInterval(timer);
-  }, [runningAnalysis]);
-
-  const formatProbability = (value: number | null) => value === null ? '—' : `${value.toFixed(0)}%`;
-  const formatProvider = (provider: MatchPrediction['aiProvider']) => provider === 'gemini' ? 'Gemini' : provider === 'groq' ? 'Groq' : 'Pending';
-
-  return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-6 md:p-10">
-      <div className="w-full max-w-7xl mx-auto">
-        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-11 h-11 rounded-2xl bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center justify-center"><BrainCircuit className="w-6 h-6 text-[#39FF14]" /></div>
-              <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">AI Football Analysis</h1>
-            </div>
-            <p className="text-[#8b8d93] text-sm md:text-base max-w-2xl">All upcoming games are shown immediately. AI results fill into each game as they become available.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={runAnalysisNow} disabled={runningAnalysis || refreshing} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2.5 text-sm font-bold hover:brightness-95 transition disabled:opacity-50"><Play className={`w-4 h-4 ${runningAnalysis ? 'animate-pulse' : ''}`} />{runningAnalysis ? 'Analysis running...' : 'Run analysis now'}</button>
-            <button type="button" onClick={() => fetchPredictions(true)} disabled={refreshing} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#2c2e33] bg-[#161618] px-4 py-2.5 text-sm font-semibold hover:bg-[#1d1d20] transition-colors disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />Refresh</button>
-          </div>
-        </header>
-
-        <section className="rounded-2xl border border-[#2c2e33] bg-[#111113] overflow-hidden shadow-lg">
-          <div className="px-5 py-4 border-b border-[#2c2e33] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center justify-center"><Target className="w-5 h-5 text-[#39FF14]" /></div>
-              <div><h2 className="text-lg font-bold">Upcoming Match Predictions <span className="text-[#8b8d93] text-sm">({predictions.length}/40)</span></h2><p className="text-xs text-[#8b8d93]">All 40 fixtures stay visible. Completed AI analysis replaces the pending state one game at a time.</p></div>
-            </div>
-            <div className="text-xs text-[#8b8d93]">{runningAnalysis ? 'Publishing analysis progressively...' : updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString()}` : 'Waiting for analysis...'}</div>
-          </div>
-
-          {loading ? (
-            <div className="p-10 flex items-center justify-center gap-3 text-sm text-[#8b8d93]"><Loader2 className="w-5 h-5 animate-spin" />Loading football fixtures...</div>
-          ) : error ? (
-            <div className="p-10 text-center"><p className="text-red-300 text-sm mb-4">{error}</p><button type="button" onClick={() => fetchPredictions(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2 text-sm font-bold"><RefreshCw className="w-4 h-4" />Retry</button></div>
-          ) : predictions.length === 0 ? (
-            <div className="p-10 text-center"><BrainCircuit className="w-10 h-10 text-[#555] mx-auto mb-3" /><p className="text-white font-semibold mb-1">No upcoming games loaded</p><p className="text-sm text-[#8b8d93] mb-5">Start an analysis cycle to load and publish the next 40 fixtures.</p><button type="button" onClick={runAnalysisNow} disabled={runningAnalysis} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2.5 text-sm font-bold disabled:opacity-50"><Play className="w-4 h-4" />{runningAnalysis ? 'Loading games...' : 'Run analysis now'}</button></div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-[#2c2e33]">
-              {predictions.map((prediction) => {
-                const pending = !prediction.analysis && !prediction.winner;
-                return <article key={prediction.id} className="bg-[#111113] p-6 hover:bg-[#171719] transition-colors">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-5"><div><p className="text-[11px] uppercase tracking-wider text-[#8b8d93] mb-1">{prediction.league}</p><h3 className="text-lg font-bold">{prediction.homeTeam} <span className="text-[#555]">vs</span> {prediction.awayTeam}</h3></div><time className="text-xs text-[#8b8d93] whitespace-nowrap">{new Date(prediction.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></div>
-                  {pending ? (
-                    <div className="rounded-xl border border-[#2c2e33] bg-[#161618] p-4 mb-4 flex items-center gap-3"><Loader2 className="w-4 h-4 animate-spin text-[#39FF14]" /><div><p className="text-sm font-bold">Analysis pending</p><p className="text-xs text-[#8b8d93]">This game is already loaded on the dashboard. Its AI analysis will appear here when processing reaches it.</p></div></div>
-                  ) : <>
-                    <div className="grid grid-cols-3 gap-2 mb-5">{[['Home', prediction.homeWin], ['Draw', prediction.draw], ['Away', prediction.awayWin]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#2c2e33] bg-[#161618] p-3 text-center"><p className="text-[10px] uppercase tracking-wide text-[#8b8d93] mb-1">{label}</p><p className="text-xl font-extrabold">{formatProbability(value as number | null)}</p></div>)}</div>
-                    <div className="rounded-xl border border-[#39FF14]/20 bg-[#39FF14]/5 p-4 mb-4"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">AI prediction</p><p className="text-xl font-extrabold text-[#39FF14]">{prediction.winner || 'Too close to call'}</p></div>{prediction.confidence !== null && <div className="text-right"><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">Confidence</p><p className="text-lg font-extrabold text-white">{prediction.confidence.toFixed(0)}%</p></div>}</div>{prediction.predictedHomeGoals !== null && prediction.predictedAwayGoals !== null && <p className="text-xs text-[#b7b9bf] mt-2">Expected score: <span className="text-white font-semibold">{prediction.predictedHomeGoals} - {prediction.predictedAwayGoals}</span></p>}{prediction.underOver && <p className="text-xs text-[#b7b9bf] mt-1">Goal outlook: <span className="text-white font-semibold">{prediction.underOver}</span></p>}</div>
-                    <div className="rounded-xl border border-[#2c2e33] bg-[#0d0d0f] p-4"><div className="flex items-center gap-2 mb-2"><BrainCircuit className="w-4 h-4 text-[#39FF14]" /><p className="text-xs font-bold uppercase tracking-wide">AI reasoning</p></div><p className="text-sm leading-6 text-[#c4c6cb]">{prediction.analysis || prediction.advice || 'The AI did not return a detailed explanation for this fixture.'}</p>{prediction.advice && prediction.analysis && prediction.advice !== prediction.analysis && <p className="text-xs text-[#8b8d93] mt-3 italic">{prediction.advice}</p>}{prediction.keyFactors.length > 0 && <div className="mt-4"><p className="text-[10px] uppercase tracking-wider text-[#6f727a] mb-2">Key factors</p><ul className="space-y-1.5">{prediction.keyFactors.map((factor, index) => <li key={`${prediction.id}-factor-${index}`} className="text-xs text-[#b7b9bf] flex gap-2"><span className="text-[#39FF14]">•</span><span>{factor}</span></li>)}</ul></div>}</div>
-                  </>}
-                  <div className="mt-4 pt-3 border-t border-[#2c2e33] flex items-center justify-between gap-3 text-[10px] text-[#6f727a]"><span>{formatProvider(prediction.aiProvider)}{prediction.aiModel ? ` · ${prediction.aiModel}` : ''}</span><span>{pending ? 'Fixture loaded · AI pending' : 'AI analysis complete'}</span></div>
-                </article>;
-              })}
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
-  );
+  const [predictions, setPredictions] = useState<MatchPrediction[]>([]); const [updatedAt, setUpdatedAt] = useState<string | null>(null); const [loading, setLoading] = useState(true); const [refreshing, setRefreshing] = useState(false); const [runningAnalysis, setRunningAnalysis] = useState(false); const [error, setError] = useState<string | null>(null);
+  const fetchPredictions = async (manual = false) => { if (manual) setRefreshing(true); try { const response = await fetch(`${API_BASE_URL}/api/football/predictions?ts=${Date.now()}`, { cache: 'no-store', headers: authHeaders() }); if (!response.ok) throw new Error(`Game analysis feed returned ${response.status}`); const payload = await response.json(); setPredictions(Array.isArray(payload.predictions) ? payload.predictions : []); setUpdatedAt(payload.updatedAt || new Date().toISOString()); setRunningAnalysis(Boolean(payload.running)); setError(null); } catch (err) { console.error('Error fetching AI game analysis:', err); setError('The AI game analysis service is temporarily unavailable.'); } finally { setLoading(false); setRefreshing(false); } };
+  const runAnalysisNow = async () => { setRunningAnalysis(true); setError(null); try { const response = await fetch(`${API_BASE_URL}/api/football/analyze-now?ts=${Date.now()}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || `Analysis request returned ${response.status}`); await fetchPredictions(); } catch (err) { console.error('Error starting AI football analysis:', err); setError(err instanceof Error ? err.message : 'Game analysis failed.'); setRunningAnalysis(false); } };
+  useEffect(() => { fetchPredictions(); const timer = window.setInterval(() => fetchPredictions(), 30_000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => { if (!runningAnalysis) return; const timer = window.setInterval(() => fetchPredictions(), 2_000); return () => window.clearInterval(timer); }, [runningAnalysis]);
+  const formatProbability = (value: number | null) => value === null ? '—' : `${value.toFixed(0)}%`; const formatProvider = (provider: MatchPrediction['aiProvider']) => provider === 'gemini' ? 'Gemini' : provider === 'groq' ? 'Groq' : 'Pending';
+  return <div className="min-h-screen bg-[#0a0a0a] text-white p-6 md:p-10"><div className="w-full max-w-7xl mx-auto">
+    <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8"><div><div className="flex items-center gap-3 mb-2"><div className="w-11 h-11 rounded-2xl bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center justify-center"><BrainCircuit className="w-6 h-6 text-[#39FF14]" /></div><h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">AI Football Game Analysis</h1></div><p className="text-[#8b8d93] text-sm md:text-base max-w-2xl">The next 40 upcoming games are loaded immediately. AI analysis is published into each game as it becomes available.</p></div><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={runAnalysisNow} disabled={runningAnalysis || refreshing} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2.5 text-sm font-bold hover:brightness-95 transition disabled:opacity-50"><Play className={`w-4 h-4 ${runningAnalysis ? 'animate-pulse' : ''}`} />{runningAnalysis ? 'Analysis running...' : 'Run analysis now'}</button><button type="button" onClick={() => fetchPredictions(true)} disabled={refreshing} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#2c2e33] bg-[#161618] px-4 py-2.5 text-sm font-semibold hover:bg-[#1d1d20] transition-colors disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />Refresh</button></div></header>
+    <section className="rounded-2xl border border-[#2c2e33] bg-[#111113] overflow-hidden shadow-lg"><div className="px-5 py-4 border-b border-[#2c2e33] flex flex-col sm:flex-row sm:items-center justify-between gap-2"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-xl bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center justify-center"><Target className="w-5 h-5 text-[#39FF14]" /></div><div><h2 className="text-lg font-bold">Upcoming Games <span className="text-[#8b8d93] text-sm">({predictions.length}/40)</span></h2><p className="text-xs text-[#8b8d93]">Analysis appears progressively, one game at a time.</p></div></div><div className="text-xs text-[#8b8d93]">{runningAnalysis ? 'Publishing analysis progressively...' : updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString()}` : 'Waiting for analysis...'}</div></div>
+      {loading ? <div className="p-10 flex items-center justify-center gap-3 text-sm text-[#8b8d93]"><Loader2 className="w-5 h-5 animate-spin" />Loading upcoming games...</div> : error ? <div className="p-10 text-center"><p className="text-red-300 text-sm mb-4">{error}</p><button type="button" onClick={() => fetchPredictions(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2 text-sm font-bold"><RefreshCw className="w-4 h-4" />Retry</button></div> : predictions.length === 0 ? <div className="p-10 text-center"><BrainCircuit className="w-10 h-10 text-[#555] mx-auto mb-3" /><p className="text-white font-semibold mb-1">No upcoming games loaded</p><p className="text-sm text-[#8b8d93] mb-5">Start an analysis cycle to load the next 40 games.</p><button type="button" onClick={runAnalysisNow} disabled={runningAnalysis} className="inline-flex items-center gap-2 rounded-xl bg-[#39FF14] text-black px-4 py-2.5 text-sm font-bold disabled:opacity-50"><Play className="w-4 h-4" />{runningAnalysis ? 'Loading games...' : 'Run analysis now'}</button></div> : <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-[#2c2e33]">{predictions.map(prediction => { const pending = !prediction.analysis && !prediction.winner; return <article key={prediction.id} className="bg-[#111113] p-6 hover:bg-[#171719] transition-colors"><div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-5"><div><p className="text-[11px] uppercase tracking-wider text-[#8b8d93] mb-1">{prediction.league}</p><h3 className="text-lg font-bold">{prediction.homeTeam} <span className="text-[#555]">vs</span> {prediction.awayTeam}</h3></div><time className="text-xs text-[#8b8d93] whitespace-nowrap">{new Date(prediction.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></div>{pending ? <div className="rounded-xl border border-[#2c2e33] bg-[#161618] p-4 mb-4 flex items-center gap-3"><Loader2 className="w-4 h-4 animate-spin text-[#39FF14]" /><div><p className="text-sm font-bold">Analysis pending</p><p className="text-xs text-[#8b8d93]">The game is loaded and waiting for AI analysis.</p></div></div> : <><div className="grid grid-cols-3 gap-2 mb-5">{[['Home', prediction.homeWin], ['Draw', prediction.draw], ['Away', prediction.awayWin]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#2c2e33] bg-[#161618] p-3 text-center"><p className="text-[10px] uppercase tracking-wide text-[#8b8d93] mb-1">{label}</p><p className="text-xl font-extrabold">{formatProbability(value as number | null)}</p></div>)}</div><div className="rounded-xl border border-[#39FF14]/20 bg-[#39FF14]/5 p-4 mb-4"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">AI prediction</p><p className="text-xl font-extrabold text-[#39FF14]">{prediction.winner || 'Too close to call'}</p></div>{prediction.confidence !== null && <div className="text-right"><p className="text-[10px] uppercase tracking-wider text-[#8b8d93] mb-1">Confidence</p><p className="text-lg font-extrabold text-white">{prediction.confidence.toFixed(0)}%</p></div>}</div>{prediction.predictedHomeGoals !== null && prediction.predictedAwayGoals !== null && <p className="text-xs text-[#b7b9bf] mt-2">Expected score: <span className="text-white font-semibold">{prediction.predictedHomeGoals} - {prediction.predictedAwayGoals}</span></p>}{prediction.underOver && <p className="text-xs text-[#b7b9bf] mt-1">Goal outlook: <span className="text-white font-semibold">{prediction.underOver}</span></p>}</div><div className="rounded-xl border border-[#2c2e33] bg-[#0d0d0f] p-4"><div className="flex items-center gap-2 mb-2"><BrainCircuit className="w-4 h-4 text-[#39FF14]" /><p className="text-xs font-bold uppercase tracking-wide">AI reasoning</p></div><p className="text-sm leading-6 text-[#c4c6cb]">{prediction.analysis || prediction.advice || 'The AI did not return a detailed explanation for this game.'}</p>{prediction.keyFactors.length > 0 && <div className="mt-4"><p className="text-[10px] uppercase tracking-wider text-[#6f727a] mb-2">Key factors</p><ul className="space-y-1.5">{prediction.keyFactors.map((factor, index) => <li key={`${prediction.id}-factor-${index}`} className="text-xs text-[#b7b9bf] flex gap-2"><span className="text-[#39FF14]">•</span><span>{factor}</span></li>)}</ul></div>}</div></>}<div className="mt-4 pt-3 border-t border-[#2c2e33] flex items-center justify-between gap-3 text-[10px] text-[#6f727a]"><span>{formatProvider(prediction.aiProvider)}{prediction.aiModel ? ` · ${prediction.aiModel}` : ''}</span><span>{pending ? 'Game loaded · AI pending' : 'AI analysis complete'}</span></div></article>; })}</div>}
+    </section>
+  </div></div>;
 }
