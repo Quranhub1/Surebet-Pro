@@ -30,6 +30,7 @@ function normalize(item) {
   return { id: String(root.fixture?.id ?? root.fixture_id ?? root.match_id ?? root.event_id ?? root.id ?? '').trim(), leagueId: Number(lObj?.id ?? root.league_id ?? root.leagueId ?? 0) || null, league: league || 'Football', country: lObj?.country || root.country || root.league_country || '', season: Number(lObj?.season ?? root.season ?? 0) || null, homeId: Number(hObj?.id ?? root.home_team_id ?? root.homeTeamId ?? 0) || null, home: home || 'Home', awayId: Number(aObj?.id ?? root.away_team_id ?? root.awayTeamId ?? 0) || null, away: away || 'Away', kickoff: root.fixture?.date || root.kickoff_at || root.kickoff || root.startTime || root.start_time || root.event?.startTime || new Date().toISOString(), status: String(root.fixture?.status?.short || root.status?.short || root.status || 'NS'), homeScore: num(root.goals?.home ?? root.home_score), awayScore: num(root.goals?.away ?? root.away_score) };
 }
 AiPredictionService.prototype.normalizeFixture = normalize;
+
 AiPredictionService.prototype.rankProviders = function(position, estimatedTokens) {
   const configured = getAiModels().filter(x => x.configured).map(x => x.provider);
   if (configured.length <= 1) return configured;
@@ -41,4 +42,28 @@ AiPredictionService.prototype.rankProviders = function(position, estimatedTokens
   console.log(`[AI] Provider routing game ${position}: preferred=${preferred.toUpperCase()} fallback=${alternate.toUpperCase()} selected=${out.map(x => x.toUpperCase()).join(',')}`);
   return out;
 };
-console.log('[AI] Runtime fixture metadata/router patch loaded. Real team names are enforced and provider routing is balanced.');
+
+// Neon can occasionally return a transient fetch failure while the service is
+// warming or multiple background jobs hit it together. Retry the complete
+// analysis cycle without changing the 12-hour retention semantics. Existing
+// predictions are reused on a retry, so this does not regenerate paid AI work.
+const originalRunAutomaticAnalysis = AiPredictionService.prototype.runAutomaticAnalysis;
+AiPredictionService.prototype.runAutomaticAnalysis = async function(limit) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await originalRunAutomaticAnalysis.call(this, limit);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      const transient = /fetch failed|ECONNRESET|ETIMEDOUT|timeout|connection|socket/i.test(message);
+      if (!transient || attempt === 3) throw error;
+      const delay = attempt * 3000;
+      console.warn(`[AI] Transient analysis dependency failure (attempt ${attempt}/3). Retrying in ${delay / 1000}s: ${message}`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+};
+
+console.log('[AI] Runtime fixture metadata/router patch loaded. Real team names are enforced, provider routing is balanced, and transient analysis failures retry safely.');
