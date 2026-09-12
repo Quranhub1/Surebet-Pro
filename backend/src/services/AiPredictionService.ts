@@ -13,7 +13,6 @@ export interface AiMatchPrediction {
 const AI_BATCH_SIZE = 6;
 const AI_OUTPUT_TOKENS = 3000;
 const ANALYSIS_CACHE_MS = 12 * 60 * 60 * 1000;
-const COMPLETED_STATUSES = ['FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN'];
 
 export class AiPredictionService {
   private cache: { expiresAt: number; data: AiMatchPrediction[] } | null = null;
@@ -31,14 +30,14 @@ export class AiPredictionService {
 
     if (!selected.length) {
       this.cache = { expiresAt: Date.now() + 15 * 60 * 1000, data: [] };
-      await this.syncCompletedHistory(14);
+      await this.syncCompletedHistory(30);
       await sql`UPDATE system_settings SET analysis_last_run_at = NOW(), analysis_last_run_status = 'no_fixtures' WHERE id = 1`;
       return [];
     }
 
     selected.forEach((match, index) => console.log(`[AI] Game ${index + 1}/${selected.length}: ${match.homeTeam} vs ${match.awayTeam} | ${match.league} | kickoff ${match.kickoff} | football-data ${match.id}`));
     await Promise.all(selected.map(match => this.storeFixture(match)));
-    await this.syncCompletedHistory(14);
+    await this.syncCompletedHistory(30);
 
     const enriched = await Promise.all(selected.map(async match => ({ fixture: this.normalizeFixture(match), history: await this.getStoredHistory(match) })));
     const system = `You are SureBet Pro's football analysis AI. Analyze football only. Never mention bookmakers, odds, stakes, ROI, arbitrage, gambling or betting advice. The football-data.org fixture feed is authoritative for teams, competition, kickoff and completed scores. Use the supplied completed-match history as evidence for each fixture: recent results, home/away performance, goals scored/conceded and head-to-head context when available. Weight recent matches more heavily than older matches. Do not invent injuries, lineups, statistics, form or results. A historical result is evidence, not a guarantee. Return ONLY valid JSON with a top-level predictions array. Every supplied fixture must receive exactly one prediction. Each prediction must contain id, winner, advice, analysis, keyFactors, confidence, homeWin, draw, awayWin, underOver, predictedHomeGoals, predictedAwayGoals. analysis must be 2-4 sentences and explicitly reflect relevant historical evidence when history exists. keyFactors must contain 3-6 short evidence-based points. confidence and probabilities are 0-100; probabilities should sum to approximately 100.`;
@@ -132,7 +131,7 @@ export class AiPredictionService {
 
   private async getStoredHistory(match: FootballDataMatch) {
     if (!match.homeId && !match.awayId) return [];
-    const rows = await sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${match.kickoff} AND status IN ('FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN') AND (home_team_id IN (${match.homeId}, ${match.awayId}) OR away_team_id IN (${match.homeId}, ${match.awayId})) ORDER BY kickoff_at DESC LIMIT 15`;
+    const rows = await sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${match.kickoff} AND status IN ('FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN') AND (home_team_id IN (${match.homeId}, ${match.awayId}) OR away_team_id IN (${match.homeId}, ${match.awayId})) ORDER BY kickoff_at DESC LIMIT 20`;
     return rows.map((row: any) => ({ id: String(row.id), league: row.league, homeTeam: row.home_team, awayTeam: row.away_team, date: new Date(row.kickoff_at).toISOString(), status: row.status, homeScore: row.home_score == null ? null : Number(row.home_score), awayScore: row.away_score == null ? null : Number(row.away_score), result: Number(row.home_score) > Number(row.away_score) ? row.home_team : Number(row.away_score) > Number(row.home_score) ? row.away_team : 'Draw' }));
   }
 
