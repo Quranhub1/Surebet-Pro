@@ -3,13 +3,22 @@ import { BrainCircuit, Loader2, RefreshCw, Target, Play } from 'lucide-react';
 import { getAuthToken } from '../contexts/AuthContext';
 
 interface MatchPrediction { id: string; league: string; homeTeam: string; awayTeam: string; startTime: string; winner: string | null; advice: string | null; analysis: string | null; keyFactors: string[]; confidence: number | null; homeWin: number | null; draw: number | null; awayWin: number | null; underOver: string | null; predictedHomeGoals: number | null; predictedAwayGoals: number | null; aiProvider: 'gemini' | 'groq' | null; aiModel: string | null; }
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://surebet-pro-n81z.onrender.com').replace(/\/$/, '');
 const authHeaders = () => ({ Authorization: `Bearer ${getAuthToken() || ''}` });
+
+async function readJson(response: Response): Promise<any> {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const body = await response.text();
+    throw new Error(`API returned ${response.status} ${response.statusText} instead of JSON${body.trim().startsWith('<!DOCTYPE') ? ' (HTML page received)' : ''}`);
+  }
+  return response.json();
+}
 
 export function Dashboard() {
   const [predictions, setPredictions] = useState<MatchPrediction[]>([]); const [updatedAt, setUpdatedAt] = useState<string | null>(null); const [loading, setLoading] = useState(true); const [refreshing, setRefreshing] = useState(false); const [runningAnalysis, setRunningAnalysis] = useState(false); const [error, setError] = useState<string | null>(null);
-  const fetchPredictions = async (manual = false) => { if (manual) setRefreshing(true); try { const response = await fetch(`${API_BASE_URL}/api/football/predictions?ts=${Date.now()}`, { cache: 'no-store', headers: authHeaders() }); if (!response.ok) throw new Error(`Game analysis feed returned ${response.status}`); const payload = await response.json(); setPredictions(Array.isArray(payload.predictions) ? payload.predictions : []); setUpdatedAt(payload.updatedAt || new Date().toISOString()); setRunningAnalysis(Boolean(payload.running)); setError(null); } catch (err) { console.error('Error fetching AI game analysis:', err); setError('The AI game analysis service is temporarily unavailable.'); } finally { setLoading(false); setRefreshing(false); } };
-  const runAnalysisNow = async () => { setRunningAnalysis(true); setError(null); try { const response = await fetch(`${API_BASE_URL}/api/football/analyze-now?ts=${Date.now()}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || `Analysis request returned ${response.status}`); await fetchPredictions(); } catch (err) { console.error('Error starting AI football analysis:', err); setError(err instanceof Error ? err.message : 'Game analysis failed.'); setRunningAnalysis(false); } };
+  const fetchPredictions = async (manual = false) => { if (manual) setRefreshing(true); try { const response = await fetch(`${API_BASE_URL}/api/football/predictions?ts=${Date.now()}`, { cache: 'no-store', headers: authHeaders() }); const payload = await readJson(response); if (!response.ok) throw new Error(payload.error || `Game analysis feed returned ${response.status}`); setPredictions(Array.isArray(payload.predictions) ? payload.predictions : []); setUpdatedAt(payload.updatedAt || new Date().toISOString()); setRunningAnalysis(Boolean(payload.running)); setError(null); } catch (err) { console.error('Error fetching AI game analysis:', err); setError(err instanceof Error ? err.message : 'The AI game analysis service is temporarily unavailable.'); } finally { setLoading(false); setRefreshing(false); } };
+  const runAnalysisNow = async () => { setRunningAnalysis(true); setError(null); try { const response = await fetch(`${API_BASE_URL}/api/football/analyze-now?ts=${Date.now()}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, cache: 'no-store' }); const payload = await readJson(response); if (!response.ok) throw new Error(payload.error || `Analysis request returned ${response.status}`); await fetchPredictions(); } catch (err) { console.error('Error starting AI football analysis:', err); setError(err instanceof Error ? err.message : 'Game analysis failed.'); setRunningAnalysis(false); } };
   useEffect(() => { fetchPredictions(); const timer = window.setInterval(() => fetchPredictions(), 30_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => { if (!runningAnalysis) return; const timer = window.setInterval(() => fetchPredictions(), 2_000); return () => window.clearInterval(timer); }, [runningAnalysis]);
   const formatProbability = (value: number | null) => value === null ? '—' : `${value.toFixed(0)}%`; const formatProvider = (provider: MatchPrediction['aiProvider']) => provider === 'gemini' ? 'Gemini' : provider === 'groq' ? 'Groq' : 'Pending';
