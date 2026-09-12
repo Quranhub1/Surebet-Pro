@@ -42,8 +42,6 @@ class RealtimeSettlementService {
   }
 
   public async refreshSchedules(): Promise<void> {
-    // Repair legacy placeholders from the original API-Football payload.
-    // Explicitly treat Home/Away/Unknown as missing, not as valid metadata.
     await sql`
       UPDATE football_fixtures
       SET league_name = CASE
@@ -96,6 +94,13 @@ class RealtimeSettlementService {
   private schedule(row: PendingMatch): void {
     const fixtureId = String(row.fixture_id);
     if (this.timers.has(fixtureId)) return;
+
+    const placeholder = (value: string) => ['home', 'away', 'home team', 'away team', 'unknown', 'unknown team', 'unknown league', 'tbd', 'n/a', 'na'].includes(String(value || '').trim().toLowerCase());
+    if (placeholder(row.home_team) || placeholder(row.away_team)) {
+      this.retries.delete(fixtureId);
+      console.warn(`[History] Skipping settlement for fixture ${fixtureId || 'unknown'} because team metadata is unresolved.`);
+      return;
+    }
 
     const kickoff = new Date(row.kickoff_at).getTime();
     const target = kickoff + SETTLEMENT_DELAY_MS;
@@ -159,8 +164,6 @@ class RealtimeSettlementService {
   private async fetchEvent(row: PendingMatch): Promise<any> {
     const apiKey = String(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY || '').trim();
 
-    // Fixture IDs are created from API-Football. Use that ID first, which avoids
-    // trying to rediscover the match in a second provider with different IDs.
     if (apiKey) {
       try {
         const response = await axios.get(`${API_FOOTBALL_BASE_URL}/fixtures`, {
@@ -177,8 +180,6 @@ class RealtimeSettlementService {
         console.warn(`[History] API-Football fixture lookup failed for ${row.home_team} vs ${row.away_team}:`, error instanceof Error ? error.message : error);
       }
 
-      // If a stored ID came from another source, find the fixture by date and
-      // team names with one API-Football request before touching BSD.
       try {
         const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
         const response = await axios.get(`${API_FOOTBALL_BASE_URL}/fixtures`, {
@@ -197,7 +198,6 @@ class RealtimeSettlementService {
       }
     }
 
-    // BSD is now a genuine fallback, not the primary settlement database.
     const bsdKey = String(process.env.BSD_API_KEY || '').trim();
     if (!bsdKey) throw new Error('No football result provider is configured.');
     return this.fetchFromBsd(row, bsdKey);
@@ -225,34 +225,14 @@ class RealtimeSettlementService {
   }
 
   private async fetchFromBsd(row: PendingMatch, key: string): Promise<any> {
+    // Always use the shared paginated date feed. The previous per-team endpoint
+    // caused one 12s network timeout per fixture and was redundant because the
+    // date feed already contains the complete result set.
     const date = new Date(row.kickoff_at).toISOString().slice(0, 10);
-    const candidates: any[] = [];
-
-    // One targeted BSD query is enough in most cases. Query the less ambiguous
-    // side first and only query the other side if the first produced no match.
-    const names = [row.home_team, row.away_team].sort((a, b) => this.normalizeTeamName(a).length - this.normalizeTeamName(b).length);
-    for (const teamName of names) {
-      try {
-        const response = await axios.get(`${BSD_BASE_URL}/events/`, {
-          params: { date_from: date, date_to: date, team_name: teamName, limit: 200, offset: 0 },
-          headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
-          timeout: REQUEST_TIMEOUT_MS,
-        });
-        const page = Array.isArray(response.data?.results) ? response.data.results : [];
-        candidates.push(...page);
-        const match = this.findBestMatch(candidates, row);
-        if (match) {
-          console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD fallback.`);
-          return match;
-        }
-      } catch (error) {
-        console.warn(`[History] BSD team search failed for ${teamName}:`, error instanceof Error ? error.message : error);
-      }
-    }
-
     const events = await this.getEventsForDate(date, key);
     const match = this.findBestMatch(events, row);
     if (!match) throw new Error(`Result event not found for ${row.home_team} vs ${row.away_team} on ${date}`);
+    console.log(`[History] Matched ${row.home_team} vs ${row.away_team} using BSD date feed.`);
     return match;
   }
 
@@ -362,32 +342,27 @@ class RealtimeSettlementService {
   }
 
   private extractEventId(event: any): string | null {
-    const id = event?.id ?? event?.event_id ?? event?.fixture_id ?? event?.match_id ?? event?.fixture?.id ?? event?.event?.id;
-    return id === null || id === undefined || id === '' ? null : String(id);
+    const value = event?.id ?? event?.event_id ?? event?.fixture_id ?? event?.event?.id;
+    return value == null ? null : String(value);
   }
 
-  private normalizeStatus(fixture: any): string {
-    const raw = String(
-      fixture?.fixture?.status?.short ??
-      fixture?.status ??
-      fixture?.event_status ??
-      fixture?.time?.status ??
-      fixture?.event?.status ??
-      ''
-    ).toLowerCase();
-    if (['finished', 'ft', 'ended', 'completed'].includes(raw)) return 'FT';
-    if (['aet'].includes(raw)) return 'AET';
+  private normalizeStatus(event: any): string {
+    const raw = String(event?.fixture?.status?.short ?? event?.status?.short ?? event?.status ?? event?.state ?? '').toLowerCase();
+    if (['ft', 'finished', 'completed', 'final'].includes(raw)) return 'FT';
+    if (['aet', 'after extra time'].includes(raw)) return 'AET';
     if (['pen', 'penalties'].includes(raw)) return 'PEN';
-    return raw.toUpperCase();
+    if (['live', 'inplay', 'in_progress'].includes(raw)) return 'LIVE';
+    if (['cancelled', 'canceled'].includes(raw)) return 'CANC';
+    if (['postponed'].includes(raw)) return 'PST';
+    return String(event?.fixture?.status?.short ?? event?.status?.short ?? event?.status ?? 'NS').toUpperCase();
   }
 
-  private readScore(fixture: any, side: 'home' | 'away'): number | null {
-    const value = side === 'home'
-      ? fixture?.goals?.home ?? fixture?.home_score ?? fixture?.score?.home ?? fixture?.scores?.home
-      : fixture?.goals?.away ?? fixture?.away_score ?? fixture?.score?.away ?? fixture?.scores?.away;
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
+  private readScore(event: any, side: 'home' | 'away'): number | null {
+    const value = event?.goals?.[side] ?? event?.score?.[side] ?? event?.[`${side}_score`] ?? event?.result?.[`${side}_score`];
+    const score = Number(value);
+    return Number.isFinite(score) ? score : null;
   }
 }
 
 export const realtimeSettlementService = new RealtimeSettlementService();
+export default realtimeSettlementService;
