@@ -8,18 +8,45 @@ import { scannerScheduler } from './engine/ScannerScheduler';
 
 dotenv.config();
 
-/**
- * BSD is the primary football-data fallback while API-Football is unavailable.
- * It exposes the same core fixture/result/prediction information through a
- * normalized adapter so the existing analysis pipeline does not need a second
- * set of fixture models or database migrations.
- */
 const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
 const BSD_BASE_URL = 'https://sports.bzzoiro.com/api/v2';
 const originalAxiosGet = axios.get.bind(axios);
 
 function hasBsdKey(): boolean {
   return Boolean(String(process.env.BSD_API_KEY || '').trim());
+}
+
+function hasApiFootballKey(): boolean {
+  return Boolean(String(
+    process.env.API_FOOTBALL_KEY ||
+    process.env.API_FOOTBALL_API_KEY ||
+    process.env.FOOTBALL_API_KEY ||
+    process.env.API_KEY ||
+    ''
+  ).trim());
+}
+
+function isPlaceholder(value: unknown): boolean {
+  return !value || ['home', 'away', 'home team', 'away team', 'unknown', 'unknown league', 'tbd', 'n/a', 'na', 'null'].includes(String(value).trim().toLowerCase());
+}
+
+function entityName(value: any): string | null {
+  if (typeof value === 'string') {
+    const name = value.trim();
+    return name && !isPlaceholder(name) ? name : null;
+  }
+  if (value && typeof value === 'object') {
+    for (const key of ['name', 'team_name', 'teamName', 'displayName', 'title', 'shortName']) {
+      const name = typeof value[key] === 'string' ? value[key].trim() : '';
+      if (name && !isPlaceholder(name)) return name;
+    }
+  }
+  return null;
+}
+
+function entityId(value: any): number | string | null {
+  if (value && typeof value === 'object') return value.id ?? value.team_id ?? value.league_id ?? null;
+  return null;
 }
 
 function bsdStatusToApiFootball(status: unknown): string {
@@ -34,30 +61,36 @@ function bsdStatusToApiFootball(status: unknown): string {
 }
 
 function bsdEventToFixture(event: any): any {
-  const home = event?.home_team || event?.home || {};
-  const away = event?.away_team || event?.away || {};
-  const league = event?.league || {};
-  const season = event?.season || {};
+  const homeValue = event?.home_team ?? event?.home ?? event?.homeTeam ?? event?.home_team_name ?? event?.homeTeamName;
+  const awayValue = event?.away_team ?? event?.away ?? event?.awayTeam ?? event?.away_team_name ?? event?.awayTeamName;
+  const leagueValue = event?.league ?? event?.competition ?? event?.tournament ?? event?.league_name ?? event?.leagueName ?? event?.competition_name ?? event?.competitionName;
+  const homeName = entityName(homeValue);
+  const awayName = entityName(awayValue);
+  const leagueName = entityName(leagueValue);
+  const homeId = entityId(homeValue) ?? event?.home_team_id ?? event?.homeTeamId ?? null;
+  const awayId = entityId(awayValue) ?? event?.away_team_id ?? event?.awayTeamId ?? null;
+  const leagueId = entityId(leagueValue) ?? event?.league_id ?? event?.leagueId ?? null;
   return {
     fixture: {
       id: event?.id,
-      date: event?.kickoff_at || event?.date || event?.start_time,
+      date: event?.kickoff_at || event?.date || event?.start_time || event?.startTime,
       status: { short: bsdStatusToApiFootball(event?.status) },
     },
     league: {
-      id: league?.id ?? event?.league_id ?? null,
-      name: league?.name ?? event?.league_name ?? 'Unknown league',
-      country: league?.country ?? event?.country ?? '',
-      season: season?.year ?? event?.season_year ?? null,
+      id: leagueId,
+      name: leagueName,
+      country: typeof leagueValue === 'object' ? (leagueValue?.country ?? '') : (event?.country ?? ''),
+      season: typeof event?.season === 'object' ? (event.season?.year ?? null) : (event?.season_year ?? event?.season ?? null),
     },
     teams: {
-      home: { id: home?.id ?? event?.home_team_id ?? null, name: home?.name ?? event?.home ?? 'Home' },
-      away: { id: away?.id ?? event?.away_team_id ?? null, name: away?.name ?? event?.away ?? 'Away' },
+      home: { id: homeId, name: homeName },
+      away: { id: awayId, name: awayName },
     },
     goals: {
       home: event?.home_score ?? event?.score?.home ?? null,
       away: event?.away_score ?? event?.score?.away ?? null,
     },
+    __bsd_metadata_valid: Boolean(homeName && awayName && leagueName),
   };
 }
 
@@ -68,9 +101,9 @@ function bsdPredictionToApiFootball(item: any): any {
   const overUnder = markets?.over_under || {};
   const predicted = String(result?.predicted || '').toLowerCase();
   const event = item?.event || {};
-  const home = event?.home_team || event?.home || 'Home';
-  const away = event?.away_team || event?.away || 'Away';
-  const winnerName = predicted === 'home' ? home : predicted === 'away' ? away : predicted === 'draw' ? null : null;
+  const home = entityName(event?.home_team ?? event?.home ?? event?.homeTeam ?? event?.home_team_name ?? event?.homeTeamName);
+  const away = entityName(event?.away_team ?? event?.away ?? event?.awayTeam ?? event?.away_team_name ?? event?.awayTeamName);
+  const winnerName = predicted === 'home' ? home : predicted === 'away' ? away : null;
   return {
     predictions: {
       winner: winnerName ? { name: winnerName, comment: null } : predicted === 'draw' ? { name: 'Draw', comment: null } : null,
@@ -100,23 +133,25 @@ async function requestBsd(path: string, params: Record<string, string | number>)
 axios.get = async function resilientFootballGet(url: string, config: any = {}) {
   const params = config?.params as Record<string, string | number> | undefined;
   const isFootballRequest = url.startsWith(API_FOOTBALL_BASE_URL);
-  if (isFootballRequest && hasBsdKey()) {
+  // BSD is a fallback only. If API-Football credentials exist, never silently
+  // replace its richer fixture metadata with a different provider's schema.
+  if (isFootballRequest && hasBsdKey() && !hasApiFootballKey()) {
     try {
       const path = url.slice(API_FOOTBALL_BASE_URL.length);
       if (path === '/fixtures' && typeof params?.date === 'string') {
         const data = await requestBsd('/events/', { date_from: params.date, date_to: params.date, status: 'upcoming', limit: 200 });
-        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture) : [];
+        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture).filter((x: any) => x.__bsd_metadata_valid) : [];
         return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
       }
       if (path === '/fixtures' && typeof params?.from === 'string' && typeof params?.to === 'string') {
         const data = await requestBsd('/events/', { date_from: params.from, date_to: params.to, status: 'finished', limit: 200 });
-        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture) : [];
+        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture).filter((x: any) => x.__bsd_metadata_valid) : [];
         return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
       }
       if (path === '/fixtures') {
         const date = typeof params?.date === 'string' ? params.date : undefined;
         const data = await requestBsd('/events/', { ...(date ? { date_from: date, date_to: date } : {}), status: 'finished', limit: 200 });
-        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture) : [];
+        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture).filter((x: any) => x.__bsd_metadata_valid) : [];
         return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
       }
       if (path === '/predictions' && params?.fixture != null) {
