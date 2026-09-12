@@ -16,7 +16,7 @@ const ANALYSIS_CACHE_MS = 12 * 60 * 60 * 1000;
 export class AiPredictionService {
   private cache: { expiresAt: number; data: AiMatchPrediction[] } | null = null;
 
-  public async runAutomaticAnalysis(limit = 40): Promise<AiMatchPrediction[]> {
+  public async runAutomaticAnalysis(limit = Number.MAX_SAFE_INTEGER): Promise<AiMatchPrediction[]> {
     const aiConfig = getActiveAiConfig();
     const geminiConfigured = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY);
     const groqConfigured = Boolean(process.env.GROQ_API_KEY);
@@ -24,7 +24,7 @@ export class AiPredictionService {
     if (!footballDataService.isConfigured()) throw new Error('FOOTBALL_DATA_API_TOKEN is not configured.');
 
     const upcoming = await footballDataService.getUpcomingMatches(7);
-    const selected = upcoming.slice(0, limit);
+    const selected = upcoming.slice(0, Math.min(limit, upcoming.length));
     console.log(`[FootballData] Loaded ${upcoming.length} upcoming matches from football-data.org; selected ${selected.length}.`);
 
     if (!selected.length) {
@@ -124,10 +124,6 @@ export class AiPredictionService {
   }
 
   private async storeFixture(match: FootballDataMatch): Promise<void> {
-    // football-data.org uses alphanumeric competition codes (e.g. BSA, PL, SA),
-    // while the existing database column is integer. league_name is the canonical
-    // competition value for this integration, so keep league_id NULL rather than
-    // attempting to insert a string into the legacy integer column.
     await sql`INSERT INTO football_fixtures (id, league_id, league_name, country, season, home_team_id, home_team, away_team_id, away_team, kickoff_at, status, home_score, away_score, raw_data, updated_at) VALUES (${match.id}, ${null}, ${match.league}, ${match.country}, ${match.season}, ${match.homeId}, ${match.homeTeam}, ${match.awayId}, ${match.awayTeam}, ${match.kickoff}, ${match.status}, ${match.homeScore}, ${match.awayScore}, ${JSON.stringify(match.raw)}, NOW()) ON CONFLICT (id) DO UPDATE SET league_id=EXCLUDED.league_id, league_name=EXCLUDED.league_name, country=EXCLUDED.country, season=EXCLUDED.season, home_team_id=EXCLUDED.home_team_id, home_team=EXCLUDED.home_team, away_team_id=EXCLUDED.away_team_id, away_team=EXCLUDED.away_team, kickoff_at=EXCLUDED.kickoff_at, status=EXCLUDED.status, home_score=EXCLUDED.home_score, away_score=EXCLUDED.away_score, raw_data=EXCLUDED.raw_data, updated_at=NOW()`;
   }
 
