@@ -50,20 +50,34 @@ export class AiPredictionService {
     if (!(process.env.API_FOOTBALL_KEY || process.env.API_FOOTBALL_API_KEY)) throw new Error('API-Football key is not configured.');
 
     const cycleExpiresAt = new Date(Date.now() + ANALYSIS_TTL_MS);
-    const existing = await sql`
-      SELECT id, league_name, home_team, away_team, kickoff_at, status, analysis_expires_at
-      FROM football_fixtures
-      WHERE analysis_expires_at > NOW() AND status IN ('NS', 'TBD')
-      ORDER BY kickoff_at ASC LIMIT ${limit}`;
 
-    let selected = existing.map((row: any) => this.rowToFixture(row));
+    // Always build the cycle from a fresh, de-duplicated API-Football fixture list first.
+    // The previous implementation started with DB rows and then mixed string fixture IDs
+    // with numeric API IDs, which allowed the same match to be selected twice and could
+    // leave a cycle with only 2-3 games instead of the requested 40.
+    const freshFixtures = await this.fetchUpcomingFixtures(limit);
+    const selected: any[] = [];
+    const known = new Set<string>();
+    for (const fixture of freshFixtures) {
+      const id = String(fixture.fixture?.id ?? fixture.id ?? '');
+      if (!id || known.has(id)) continue;
+      known.add(id);
+      selected.push(fixture);
+      if (selected.length >= limit) break;
+    }
+
+    // If the API temporarily returns fewer fixtures, retain valid DB fixtures to fill the cycle.
     if (selected.length < limit) {
-      const fixtures = await this.fetchUpcomingFixtures(limit - selected.length);
-      const known = new Set(selected.map(item => item.id));
-      for (const fixture of fixtures) {
-        if (known.has(fixture.id)) continue;
-        selected.push(fixture);
-        known.add(fixture.id);
+      const existing = await sql`
+        SELECT id, league_name, home_team, away_team, kickoff_at, status, analysis_expires_at
+        FROM football_fixtures
+        WHERE analysis_expires_at > NOW() AND status IN ('NS', 'TBD')
+        ORDER BY kickoff_at ASC LIMIT ${limit}`;
+      for (const row of existing) {
+        const id = String(row.id);
+        if (known.has(id)) continue;
+        known.add(id);
+        selected.push(this.rowToFixture(row));
         if (selected.length >= limit) break;
       }
     }
@@ -73,12 +87,14 @@ export class AiPredictionService {
       return [];
     }
 
+    // Publish all fixtures to Neon before the first AI call. This makes all 40 cards
+    // visible to the dashboard immediately, while the AI result for each card is filled later.
     await Promise.all(selected.map(async fixture => {
       await this.storeFixture(fixture.raw || fixture, cycleExpiresAt);
-      await sql`UPDATE football_fixtures SET analysis_expires_at = COALESCE(analysis_expires_at, ${cycleExpiresAt.toISOString()}), updated_at = NOW() WHERE id = ${fixture.id}`;
+      await sql`UPDATE football_fixtures SET analysis_expires_at = COALESCE(analysis_expires_at, ${cycleExpiresAt.toISOString()}), updated_at = NOW() WHERE id = ${String(fixture.id ?? fixture.fixture?.id)}`;
     }));
 
-    console.log(`[AI] Dynamic cycle loaded ${selected.length} games. Existing completed analyses are retained and pending games will be processed incrementally.`);
+    console.log(`[AI] Dynamic cycle loaded ${selected.length} unique games. All fixtures are published before incremental AI processing.`);
     const results: AiMatchPrediction[] = [];
 
     for (const [index, fixture] of selected.entries()) {
@@ -129,7 +145,7 @@ export class AiPredictionService {
         await this.storePrediction(result, context, new Date(Date.now() + ANALYSIS_TTL_MS));
         results.push(result);
         this.cache = { expiresAt: Date.now() + 15 * 60 * 1000, data: results.slice() };
-        console.log(`[AI] Published prediction ${results.length}/${selected.length}: ${result.homeTeam} vs ${result.awayTeam} via ${result.aiProvider}.`);
+        console.log(`[AI] Published prediction ${index + 1}/${selected.length}: ${result.homeTeam} vs ${result.awayTeam} via ${result.aiProvider}.`);
       }
 
       await this.sleep(FREE_PLAN_MINUTE_DELAY_MS);
@@ -142,6 +158,7 @@ export class AiPredictionService {
 
   private async fetchUpcomingFixtures(limit: number): Promise<any[]> {
     const found: any[] = [];
+    const known = new Set<string>();
     const today = new Date();
     for (let offset = 0; offset < 7 && found.length < limit; offset += 1) {
       const date = this.formatDate(new Date(today.getTime() + offset * 86400000));
@@ -151,10 +168,13 @@ export class AiPredictionService {
           ? data.response.filter((fixture: any) => ['NS', 'TBD'].includes(String(fixture.fixture?.status?.short)))
           : [];
         for (const fixture of fixtures) {
-          if (!found.some(item => String(item.fixture?.id) === String(fixture.fixture?.id))) found.push(fixture);
+          const id = String(fixture.fixture?.id ?? '');
+          if (!id || known.has(id)) continue;
+          known.add(id);
+          found.push(fixture);
           if (found.length >= limit) break;
         }
-        console.log(`[AI] Found ${fixtures.length} upcoming games for ${date}.`);
+        console.log(`[AI] Found ${fixtures.length} upcoming games for ${date}; ${found.length}/${limit} unique fixtures collected.`);
       } catch (error) {
         console.warn(`[AI] Skipping unavailable API-Football date ${date}:`, error instanceof Error ? error.message : error);
       }
@@ -335,7 +355,19 @@ export class AiPredictionService {
   }
 
   private rowToFixture(row: any): any {
-    return { id: String(row.id), league: row.league_name, home: row.home_team, away: row.away_team, kickoff: new Date(row.kickoff_at).toISOString(), status: row.status, raw: { fixture: { id: row.id, date: row.kickoff_at, status: { short: row.status } }, league: { name: row.league_name }, teams: { home: { name: row.home_team }, away: { name: row.away_team } } } };
+    return {
+      id: String(row.id),
+      league: row.league_name,
+      home: row.home_team,
+      away: row.away_team,
+      kickoff: new Date(row.kickoff_at).toISOString(),
+      status: row.status,
+      raw: {
+        fixture: { id: row.id, date: row.kickoff_at, status: { short: row.status } },
+        league: { name: row.league_name },
+        teams: { home: { name: row.home_team }, away: { name: row.away_team } },
+      },
+    };
   }
 
   private compactObject(value: any): any {
