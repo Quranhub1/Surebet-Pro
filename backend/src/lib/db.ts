@@ -7,7 +7,7 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required for Neon PostgreSQL.
 export const sql = neon(databaseUrl);
 
 export async function ensureDatabase(): Promise<void> {
-  await sql`CREATE TABLE IF NOT EXISTS system_settings (id integer PRIMARY KEY, min_roi double precision NOT NULL DEFAULT 1, deep_scan boolean NOT NULL DEFAULT true, odds_api_key text, api_base_url text, api_endpoint_odds text, last_run_date text, last_run_at timestamptz, last_run_status text, analysis_last_run_at timestamptz, analysis_last_run_status text)`;
+  await sql`CREATE TABLE IF NOT EXISTS system_settings (id integer PRIMARY KEY, min_roi double precision NOT NULL DEFAULT 1, deep_scan boolean NOT NULL DEFAULT true, odds_api_key text, api_base_url text, api_endpoint_odds text, last_run_date text, last_run_at timestamptz, last_run_status text, analysis_last_run_at timestamptz, analysis_last_run_status text, analysis_lock_at timestamptz)`;
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS min_roi double precision NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS deep_scan boolean NOT NULL DEFAULT true`;
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS odds_api_key text`;
@@ -18,6 +18,7 @@ export async function ensureDatabase(): Promise<void> {
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS last_run_status text`;
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS analysis_last_run_at timestamptz`;
   await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS analysis_last_run_status text`;
+  await sql`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS analysis_lock_at timestamptz`;
   await sql`INSERT INTO system_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`;
 
   await sql`CREATE TABLE IF NOT EXISTS sports (key text PRIMARY KEY, title text NOT NULL, description text NOT NULL DEFAULT '', active boolean NOT NULL DEFAULT true)`;
@@ -30,8 +31,6 @@ export async function ensureDatabase(): Promise<void> {
   await sql`ALTER TABLE markets ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`;
   await sql`CREATE TABLE IF NOT EXISTS bookmakers (key text PRIMARY KEY, title text NOT NULL, active boolean NOT NULL DEFAULT true)`;
   await sql`ALTER TABLE bookmakers ADD COLUMN IF NOT EXISTS title text NOT NULL DEFAULT ''`;
-  await sql`ALTER TABLE bookmakers ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`;
-
   await sql`CREATE TABLE IF NOT EXISTS events (id text PRIMARY KEY, sport_key text NOT NULL, league_title text NOT NULL DEFAULT 'Unknown League', home_team text NOT NULL, away_team text NOT NULL, commence_time timestamptz NOT NULL)`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS league_title text NOT NULL DEFAULT 'Unknown League'`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS sport_key text NOT NULL DEFAULT 'unknown'`;
@@ -51,14 +50,18 @@ export async function ensureDatabase(): Promise<void> {
   await sql`ALTER TABLE surebet_legs ADD COLUMN IF NOT EXISTS stake_percentage double precision NOT NULL DEFAULT 0`;
   await sql`CREATE INDEX IF NOT EXISTS idx_surebet_legs_opportunity ON surebet_legs (opportunity_id)`;
 
-  await sql`CREATE TABLE IF NOT EXISTS football_fixtures (id text PRIMARY KEY, league_id integer, league_name text NOT NULL, country text, season integer, home_team_id integer, home_team text NOT NULL, away_team_id integer, away_team text NOT NULL, kickoff_at timestamptz NOT NULL, status text NOT NULL, home_score integer, away_score integer, raw_data jsonb, updated_at timestamptz NOT NULL DEFAULT now())`;
+  await sql`CREATE TABLE IF NOT EXISTS football_fixtures (id text PRIMARY KEY, league_id integer, league_name text NOT NULL, country text, season integer, home_team_id integer, home_team text NOT NULL, away_team_id integer, away_team text NOT NULL, kickoff_at timestamptz NOT NULL, status text NOT NULL, home_score integer, away_score integer, raw_data jsonb, analysis_expires_at timestamptz, updated_at timestamptz NOT NULL DEFAULT now())`;
+  await sql`ALTER TABLE football_fixtures ADD COLUMN IF NOT EXISTS analysis_expires_at timestamptz`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_home_team ON football_fixtures (home_team_id, kickoff_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_away_team ON football_fixtures (away_team_id, kickoff_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_kickoff ON football_fixtures (kickoff_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_status ON football_fixtures (status, kickoff_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_analysis_expiry ON football_fixtures (analysis_expires_at DESC)`;
 
-  await sql`CREATE TABLE IF NOT EXISTS football_ai_predictions (fixture_id text PRIMARY KEY, winner text, advice text, analysis text, key_factors jsonb NOT NULL DEFAULT '[]'::jsonb, confidence double precision, home_win double precision, draw double precision, away_win double precision, under_over text, predicted_home_goals double precision, predicted_away_goals double precision, ai_provider text, ai_model text, source_prediction jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`;
+  await sql`CREATE TABLE IF NOT EXISTS football_ai_predictions (fixture_id text PRIMARY KEY, winner text, advice text, analysis text, key_factors jsonb NOT NULL DEFAULT '[]'::jsonb, confidence double precision, home_win double precision, draw double precision, away_win double precision, under_over text, predicted_home_goals double precision, predicted_away_goals double precision, ai_provider text, ai_model text, source_prediction jsonb, expires_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`;
+  await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS expires_at timestamptz`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_updated ON football_ai_predictions (updated_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_expires ON football_ai_predictions (expires_at DESC)`;
 
   await sql`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, email text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL DEFAULT 'USER', created_at timestamptz NOT NULL DEFAULT now())`;
   await sql`CREATE TABLE IF NOT EXISTS user_alerts (id text PRIMARY KEY, user_id text NOT NULL, min_roi double precision NOT NULL, sport_key text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`;
