@@ -6,6 +6,7 @@ const SETTLEMENT_DELAY_MS = 105 * 60 * 1000;
 const RETRY_DELAY_MS = 5 * 60 * 1000;
 const MAX_RETRIES = 24;
 const DATE_CACHE_MS = 2 * 60 * 1000;
+const MAX_DATE_PAGES = 20;
 
 type PendingMatch = {
   fixture_id: string;
@@ -148,22 +149,58 @@ class RealtimeSettlementService {
   private async getEventsForDate(date: string, key: string): Promise<any[]> {
     const cached = this.dateCache.get(date);
     if (cached && cached.expiresAt > Date.now()) return cached.events;
-    const response = await axios.get(`${BSD_BASE_URL}/events/`, {
-      params: { date_from: date, date_to: date, limit: 200 },
-      headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
-      timeout: 20_000,
-    });
-    const events = Array.isArray(response.data?.results) ? response.data.results : [];
+
+    const events: any[] = [];
+    for (let offset = 0; offset < MAX_DATE_PAGES * 200; offset += 200) {
+      const response = await axios.get(`${BSD_BASE_URL}/events/`, {
+        params: { date_from: date, date_to: date, limit: 200, offset },
+        headers: { Authorization: `Token ${key}`, Accept: 'application/json' },
+        timeout: 20_000,
+      });
+      const page = Array.isArray(response.data?.results) ? response.data.results : [];
+      events.push(...page);
+      const count = Number(response.data?.count);
+      if (!page.length || !response.data?.next || (Number.isFinite(count) && events.length >= count)) break;
+    }
+
     this.dateCache.set(date, { expiresAt: Date.now() + DATE_CACHE_MS, events });
+    console.log(`[History] Loaded ${events.length} BSD events for ${date} across paginated result pages.`);
     return events;
   }
 
+  private normalizeTeamName(value: unknown): string {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\b(football|fc|cf|sc|club|women|woman|w|u19|u20|u21|ii)\b/g, ' ')
+      .replace(/\b(2)\b/g, 'ii')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private teamSimilarity(a: unknown, b: unknown): number {
+    const left = this.normalizeTeamName(a);
+    const right = this.normalizeTeamName(b);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+    if (left.includes(right) || right.includes(left)) return 0.9;
+    const leftTokens = new Set(left.split(' '));
+    const rightTokens = new Set(right.split(' '));
+    const intersection = [...leftTokens].filter(token => rightTokens.has(token)).length;
+    return intersection / Math.max(leftTokens.size, rightTokens.size);
+  }
+
   private isMatchingEvent(event: any, row: PendingMatch): boolean {
-    const home = String(event?.home_team?.name ?? event?.home_team ?? event?.home ?? '').trim().toLowerCase();
-    const away = String(event?.away_team?.name ?? event?.away_team ?? event?.away ?? '').trim().toLowerCase();
-    const expectedHome = row.home_team.trim().toLowerCase();
-    const expectedAway = row.away_team.trim().toLowerCase();
-    if (!home || !away || home !== expectedHome || away !== expectedAway) return false;
+    const home = event?.home_team?.name ?? event?.home_team ?? event?.home;
+    const away = event?.away_team?.name ?? event?.away_team ?? event?.away;
+    if (!home || !away) return false;
+
+    const homeSimilarity = this.teamSimilarity(home, row.home_team);
+    const awaySimilarity = this.teamSimilarity(away, row.away_team);
+    if (homeSimilarity < 0.6 || awaySimilarity < 0.6) return false;
+
     const eventKickoff = event?.kickoff_at ?? event?.kickoff ?? event?.date ?? event?.start_time;
     if (!eventKickoff) return true;
     const difference = Math.abs(new Date(eventKickoff).getTime() - new Date(row.kickoff_at).getTime());
