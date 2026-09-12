@@ -36,7 +36,7 @@ function entityName(value: any): string | null {
     return name && !isPlaceholder(name) ? name : null;
   }
   if (value && typeof value === 'object') {
-    for (const key of ['name', 'team_name', 'teamName', 'displayName', 'display_name', 'title', 'shortName', 'short_name']) {
+    for (const key of ['name', 'team_name', 'teamName', 'displayName', 'title', 'shortName']) {
       const name = typeof value[key] === 'string' ? value[key].trim() : '';
       if (name && !isPlaceholder(name)) return name;
     }
@@ -51,8 +51,7 @@ function entityId(value: any): number | string | null {
 
 function bsdStatusToApiFootball(status: unknown): string {
   switch (String(status || '').toLowerCase()) {
-    case 'upcoming':
-    case 'scheduled': return 'NS';
+    case 'upcoming': return 'NS';
     case 'live': return 'LIVE';
     case 'finished': return 'FT';
     case 'cancelled': return 'CANC';
@@ -71,17 +70,16 @@ function bsdEventToFixture(event: any): any {
   const homeId = entityId(homeValue) ?? event?.home_team_id ?? event?.homeTeamId ?? null;
   const awayId = entityId(awayValue) ?? event?.away_team_id ?? event?.awayTeamId ?? null;
   const leagueId = entityId(leagueValue) ?? event?.league_id ?? event?.leagueId ?? null;
-  const kickoff = event?.event_date || event?.kickoff_at || event?.date || event?.start_time || event?.startTime;
   return {
     fixture: {
       id: event?.id,
-      date: kickoff,
+      date: event?.kickoff_at || event?.date || event?.start_time || event?.startTime,
       status: { short: bsdStatusToApiFootball(event?.status) },
     },
     league: {
       id: leagueId,
       name: leagueName,
-      country: typeof leagueValue === 'object' ? (leagueValue?.country ?? leagueValue?.country_code ?? '') : (event?.country ?? ''),
+      country: typeof leagueValue === 'object' ? (leagueValue?.country ?? '') : (event?.country ?? ''),
       season: typeof event?.season === 'object' ? (event.season?.year ?? null) : (event?.season_year ?? event?.season ?? null),
     },
     teams: {
@@ -92,8 +90,7 @@ function bsdEventToFixture(event: any): any {
       home: event?.home_score ?? event?.score?.home ?? null,
       away: event?.away_score ?? event?.score?.away ?? null,
     },
-    __bsd_metadata_valid: Boolean(homeName && awayName && leagueName && kickoff),
-    __provider: 'bsd',
+    __bsd_metadata_valid: Boolean(homeName && awayName && leagueName),
   };
 }
 
@@ -133,70 +130,38 @@ async function requestBsd(path: string, params: Record<string, string | number>)
   return response.data;
 }
 
-function hasApiError(data: any): boolean {
-  const errors = data?.errors;
-  return Boolean(errors && ((Array.isArray(errors) && errors.length) || (typeof errors === 'object' && Object.keys(errors).length) || (typeof errors !== 'object' && errors)));
-}
-
-async function bsdFallback(path: string, params: Record<string, string | number> | undefined, config: any): Promise<any> {
-  if (!hasBsdKey()) throw new Error('BSD_API_KEY is not configured.');
-  if (path === '/fixtures') {
-    const dates: string[] = [];
-    if (typeof params?.date === 'string') dates.push(params.date);
-    if (typeof params?.from === 'string' && typeof params?.to === 'string') {
-      const from = new Date(`${params.from}T00:00:00Z`);
-      const to = new Date(`${params.to}T00:00:00Z`);
-      for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) dates.push(cursor.toISOString().slice(0, 10));
-    }
-    if (!dates.length) return null;
-    const events: any[] = [];
-    for (const date of dates) {
-      for (let offset = 0; offset < 20 * 200; offset += 200) {
-        const data = await requestBsd('/events/', { date_from: date, date_to: date, limit: 200, offset });
-        const page = Array.isArray(data?.results) ? data.results : [];
-        events.push(...page);
-        const count = Number(data?.count);
-        if (!page.length || !data?.next || (Number.isFinite(count) && events.length >= count)) break;
-      }
-    }
-    const results = Array.from(new Map(events.map(event => [String(event?.id), bsdEventToFixture(event)])).values()).filter((fixture: any) => fixture?.__bsd_metadata_valid);
-    console.warn(`[AI] API-Football unavailable; using BSD fixture feed fallback for ${results.length} valid fixtures.`);
-    return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
-  }
-
-  if (path === '/predictions' && params?.fixture != null) {
-    const data = await requestBsd(`/events/${encodeURIComponent(String(params.fixture))}/prediction/`, {});
-    const item = Array.isArray(data) ? data[0] : data;
-    if (!item) return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: 0, paging: { current: 1, total: 1 }, response: [] } } as any;
-    console.warn(`[AI] API-Football prediction unavailable; using BSD prediction fallback for fixture ${params.fixture}.`);
-    return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: 1, paging: { current: 1, total: 1 }, response: [bsdPredictionToApiFootball(item)] } } as any;
-  }
-  return null;
-}
-
 axios.get = async function resilientFootballGet(url: string, config: any = {}) {
   const params = config?.params as Record<string, string | number> | undefined;
   const isFootballRequest = url.startsWith(API_FOOTBALL_BASE_URL);
-
-  if (isFootballRequest && hasBsdKey()) {
-    const path = url.slice(API_FOOTBALL_BASE_URL.length);
-    if (!hasApiFootballKey()) {
-      const fallback = await bsdFallback(path, params, config);
-      if (fallback) return fallback;
-    } else {
-      try {
-        const response = await originalAxiosGet(url, config);
-        if (!hasApiError(response.data)) return response;
-        console.warn(`[AI] API-Football returned an error; switching to BSD for ${path}.`);
-      } catch (error) {
-        console.warn(`[AI] API-Football request failed; switching to BSD for ${path}:`, error instanceof Error ? error.message : error);
+  // API-Football is the primary provider. BSD is used only when the
+  // API-Football credential is not configured, preserving authenticated
+  // API-Football responses and their richer fixture metadata.
+  if (isFootballRequest && hasBsdKey() && !hasApiFootballKey()) {
+    try {
+      const path = url.slice(API_FOOTBALL_BASE_URL.length);
+      if (path === '/fixtures' && typeof params?.date === 'string') {
+        const data = await requestBsd('/events/', { date_from: params.date, date_to: params.date, status: 'upcoming', limit: 200 });
+        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture).filter((x: any) => x.__bsd_metadata_valid) : [];
+        return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
       }
-      try {
-        const fallback = await bsdFallback(path, params, config);
-        if (fallback) return fallback;
-      } catch (error) {
-        console.warn(`[AI] BSD fallback failed for ${path}:`, error instanceof Error ? error.message : error);
+      if (path === '/fixtures' && typeof params?.from === 'string' && typeof params?.to === 'string') {
+        const data = await requestBsd('/events/', { date_from: params.from, date_to: params.to, status: 'finished', limit: 200 });
+        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture).filter((x: any) => x.__bsd_metadata_valid) : [];
+        return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
       }
+      if (path === '/fixtures') {
+        const date = typeof params?.date === 'string' ? params.date : undefined;
+        const data = await requestBsd('/events/', { ...(date ? { date_from: date, date_to: date } : {}), status: 'finished', limit: 200 });
+        const results = Array.isArray(data?.results) ? data.results.map(bsdEventToFixture).filter((x: any) => x.__bsd_metadata_valid) : [];
+        return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: results.length, paging: { current: 1, total: 1 }, response: results } } as any;
+      }
+      if (path === '/predictions' && params?.fixture != null) {
+        const data = await requestBsd('/events/' + encodeURIComponent(String(params.fixture)) + '/prediction/', {});
+        const item = Array.isArray(data) ? data[0] : data;
+        return { status: 200, statusText: 'OK', headers: {}, config, data: { errors: [], results: item ? 1 : 0, paging: { current: 1, total: 1 }, response: item ? [bsdPredictionToApiFootball(item)] : [] } } as any;
+      }
+    } catch (error) {
+      console.warn('[BSD] Request failed, falling back to API-Football:', error instanceof Error ? error.message : error);
     }
   }
 
@@ -206,9 +171,9 @@ axios.get = async function resilientFootballGet(url: string, config: any = {}) {
   const errors = response.data?.errors;
   const errorText = Array.isArray(errors) ? errors.join('; ') : errors && typeof errors === 'object' ? Object.values(errors).join('; ') : '';
   if (!/From field|To field/i.test(errorText)) return response;
-  console.warn(`[AI] API-Football rejected from/to range (${params.from} -> ${params.to}); falling back to daily fixture requests.`);
   const from = new Date(`${params.from}T00:00:00Z`); const to = new Date(`${params.to}T00:00:00Z`);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) return response;
+  console.warn(`[AI] API-Football rejected from/to range (${params.from} -> ${params.to}); falling back to daily fixture requests.`);
   const fixtures: any[] = [];
   for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
     const date = cursor.toISOString().slice(0, 10); const dailyParams = { ...params }; delete dailyParams.from; delete dailyParams.to; dailyParams.date = date;
