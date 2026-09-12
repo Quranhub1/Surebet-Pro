@@ -1,0 +1,69 @@
+import React, { useEffect, useState } from 'react';
+import { CheckCircle2, Clock3, CreditCard, Loader2, ShieldCheck } from 'lucide-react';
+import { getAuthToken } from '../contexts/AuthContext';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+type Subscription = {
+  trialActive: boolean;
+  trialStartedAt: string;
+  trialExpiresAt: string;
+  subscriptionStatus: string;
+  subscriptionExpiresAt: string | null;
+  paymentAmountUgx: number;
+  paymentNumber: string;
+  paymentName: string;
+};
+
+type State = { isAdmin: boolean; subscription: Subscription | null };
+
+export function SubscriptionGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<State | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [requesting, setRequesting] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/subscription`, { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Subscription status unavailable');
+      setState({ isAdmin: Boolean(data.isAdmin), subscription: data.subscription || null });
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Subscription status unavailable');
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (state?.subscription?.subscriptionStatus !== 'pending') return;
+    const timer = window.setInterval(() => void load(), 15000);
+    return () => window.clearInterval(timer);
+  }, [state?.subscription?.subscriptionStatus]);
+
+  if (loading) return <div className="flex h-screen items-center justify-center bg-[#0a0a0a]"><Loader2 className="h-8 w-8 animate-spin text-[#39FF14]" /></div>;
+  if (state?.isAdmin || state?.subscription?.trialActive || state?.subscription?.subscriptionStatus === 'active') return <>{children}</>;
+
+  const pending = state?.subscription?.subscriptionStatus === 'pending';
+  const trialEnds = state?.subscription?.trialExpiresAt ? new Date(state.subscription.trialExpiresAt).toLocaleString() : null;
+
+  return <div className="flex min-h-screen items-center justify-center bg-[#0a0a0a] p-4 text-white">
+    <div className="w-full max-w-lg rounded-2xl border border-[#2a2a2a] bg-[#111] p-6 shadow-2xl">
+      <div className="mb-5 flex items-center gap-3"><div className="rounded-xl bg-[#39FF14]/10 p-3"><CreditCard className="h-6 w-6 text-[#39FF14]" /></div><div><h1 className="text-xl font-bold">Weekly access subscription</h1><p className="text-sm text-gray-400">Your 3-day free trial has ended.</p></div></div>
+      <div className="rounded-xl border border-[#292929] bg-[#0d0d0d] p-5">
+        <div className="text-3xl font-black">UGX {Number(state?.subscription?.paymentAmountUgx || 5000).toLocaleString()} <span className="text-sm font-medium text-gray-500">/ 7 days</span></div>
+        <div className="mt-4 space-y-2 text-sm"><div className="flex justify-between"><span className="text-gray-400">Send payment to</span><span className="font-semibold">{state?.subscription?.paymentNumber || '0749846848'}</span></div><div className="flex justify-between"><span className="text-gray-400">Account name</span><span className="font-semibold">{state?.subscription?.paymentName || 'Kabali Madina'}</span></div></div>
+      </div>
+      {pending ? <div className="mt-5 rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4"><div className="flex items-center gap-2 font-semibold text-yellow-300"><Clock3 className="h-5 w-5" /> Payment awaiting verification</div><p className="mt-2 text-sm text-gray-400">Your payment request has been recorded. Access will unlock automatically after the administrator approves it.</p></div> : <>
+        <p className="mt-4 text-sm leading-6 text-gray-400">After sending UGX 5,000, press the button below. The administrator verifies the payment manually before activating your 7-day access.</p>
+        <button disabled={requesting} onClick={async () => { setRequesting(true); setError(''); try { const token = getAuthToken(); const response = await fetch(`${API_BASE_URL}/api/subscription/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Could not submit payment request'); setState({ isAdmin: false, subscription: data.subscription }); } catch (err) { setError(err instanceof Error ? err.message : 'Could not submit payment request'); } finally { setRequesting(false); } }} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#39FF14] px-4 py-3 font-bold text-black disabled:opacity-50"><CheckCircle2 className="h-5 w-5" />{requesting ? 'Submitting…' : "I've Paid, Verify My Payment"}</button>
+      </>}
+      {trialEnds && <p className="mt-4 text-center text-xs text-gray-600">Trial ended {trialEnds}</p>}
+      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+      <div className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-600"><ShieldCheck className="h-4 w-4" /> Payment is manually verified by the site administrator.</div>
+    </div>
+  </div>;
+}
