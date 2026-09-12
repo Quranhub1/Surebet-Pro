@@ -1,5 +1,5 @@
 import { sql } from '../lib/db';
-import { generateWithAi, getActiveAiConfig, type AiProvider } from './AiModelService';
+import { generateSingleWithAi, getActiveAiConfig, type AiProvider } from './AiModelService';
 import { footballDataService, type FootballDataMatch } from './FootballDataService';
 
 export interface AiMatchPrediction {
@@ -43,7 +43,6 @@ export class AiPredictionService {
     const system = `You are SureBet Pro's football analysis AI. Analyze football only. Never mention bookmakers, odds, stakes, ROI, arbitrage, gambling or betting advice. Use only the supplied fixture data and stored completed-game history. Do not invent injuries, lineups, statistics, form or results. Return ONLY valid JSON with a top-level predictions array. Every supplied fixture must receive exactly one prediction. Each prediction must contain id, winner, advice, analysis, keyFactors, confidence, homeWin, draw, awayWin, underOver, predictedHomeGoals, predictedAwayGoals. analysis must be 2-4 sentences. keyFactors must contain 3-6 short evidence-based points. confidence and probabilities are 0-100; probabilities should sum to approximately 100.`;
 
     const results: AiMatchPrediction[] = [];
-    const preferredProvider: AiProvider = aiConfig.provider;
     const configuredProviders: AiProvider[] = [...(geminiConfigured ? ['gemini' as AiProvider] : []), ...(groqConfigured ? ['groq' as AiProvider] : [])];
     if (!configuredProviders.length) throw new Error('No configured AI provider is available.');
 
@@ -51,24 +50,26 @@ export class AiPredictionService {
       const batch = enriched.slice(batchStart, batchStart + AI_BATCH_SIZE);
       const batchNumber = Math.floor(batchStart / AI_BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(enriched.length / AI_BATCH_SIZE);
-      const orderedProviders = [preferredProvider, ...configuredProviders.filter(provider => provider !== preferredProvider)];
+      const orderedProviders = [aiConfig.provider, ...configuredProviders.filter(provider => provider !== aiConfig.provider)];
       const primary = orderedProviders[(batchNumber - 1) % orderedProviders.length];
       const fallback = orderedProviders.find(provider => provider !== primary && configuredProviders.includes(provider));
       const prompt = `Analyze ONLY these ${batch.length} upcoming fixtures. Preserve each fixture id exactly. The fixture feed is authoritative for team names, competition and kickoff. Historical games are evidence when available.\n\n${JSON.stringify(batch, null, 2)}`;
       let raw = '';
       let usedProvider: AiProvider | null = null;
       try {
-        raw = await generateWithAi({ provider: primary, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
+        raw = await generateSingleWithAi({ provider: primary, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
         usedProvider = primary;
         console.log(`[AI] Batch ${batchNumber}/${totalBatches} completed with ${primary} (${batch.length} games).`);
       } catch (error) {
         console.warn(`[AI] Batch ${batchNumber}/${totalBatches} ${primary} failed:`, error instanceof Error ? error.message : error);
         if (fallback) {
           try {
-            raw = await generateWithAi({ provider: fallback, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
+            raw = await generateSingleWithAi({ provider: fallback, system, prompt, temperature: 0.2, maxTokens: AI_OUTPUT_TOKENS });
             usedProvider = fallback;
             console.log(`[AI] Batch ${batchNumber}/${totalBatches} fallback completed with ${fallback} (${batch.length} games).`);
-          } catch (fallbackError) { console.error(`[AI] Batch ${batchNumber}/${totalBatches} fallback ${fallback} failed:`, fallbackError instanceof Error ? fallbackError.message : fallbackError); }
+          } catch (fallbackError) {
+            console.error(`[AI] Batch ${batchNumber}/${totalBatches} fallback ${fallback} failed:`, fallbackError instanceof Error ? fallbackError.message : fallbackError);
+          }
         }
       }
       if (!raw || !usedProvider) { console.error(`[AI] Batch ${batchNumber}/${totalBatches} produced no analysis; continuing so other fetched games are still processed.`); continue; }
