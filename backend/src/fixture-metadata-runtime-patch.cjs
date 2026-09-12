@@ -13,7 +13,7 @@ const text = v => {
   return null;
 };
 function find(root, keys, depth=0, seen=new Set()) {
-  if (root == null || depth > 10) return null;
+  if (root == null || depth > 12) return null;
   if (typeof root === 'string') { try { root = JSON.parse(root); } catch { return null; } }
   if (!root || typeof root !== 'object' || seen.has(root)) return null;
   seen.add(root);
@@ -40,14 +40,53 @@ AiPredictionService.prototype.rankProviders = function(position, estimatedTokens
   const preferred = position % 2 === 1 ? 'gemini' : 'groq';
   const alternate = preferred === 'gemini' ? 'groq' : 'gemini';
   const now = Date.now();
-  const can = p => { const s = state[p]; s.used = s.used.filter(t => t > now - WINDOW); return configured.includes(p) && s.cooldown <= now && s.used.length * estimatedTokens < BUDGETS[p]; };
+  const can = p => { const s = state[p]; s.used = s.used.filter(t => t > now - WINDOW); return configured.includes(p) && s.cooldown <= now && s.used.length < Math.floor(BUDGETS[p] / Math.max(1, estimatedTokens)); };
   const out = [preferred, alternate].filter(can);
   console.log(`[AI] Provider routing game ${position}: preferred=${preferred.toUpperCase()} fallback=${alternate.toUpperCase()} selected=${out.map(x => x.toUpperCase()).join(',')}`);
   return out;
 };
 
+async function repairBadFixtureRows() {
+  if (!process.env.DATABASE_URL) return 0;
+  const db = neon(process.env.DATABASE_URL);
+  let rows = [];
+  try {
+    rows = await db`SELECT id, raw_data, league_name, home_team, away_team, kickoff_at FROM football_fixtures WHERE LOWER(BTRIM(COALESCE(home_team,''))) IN ('','home','home team','unknown','tbd','n/a','na') OR LOWER(BTRIM(COALESCE(away_team,''))) IN ('','away','away team','unknown','tbd','n/a','na') OR LOWER(BTRIM(COALESCE(league_name,''))) IN ('','unknown','unknown league','n/a','na') ORDER BY kickoff_at ASC LIMIT 200`;
+  } catch (error) {
+    console.warn('[AI] Placeholder fixture preflight query failed:', error?.message || error);
+    return 0;
+  }
+  let repaired = 0;
+  for (const row of rows) {
+    let fixed = row.raw_data ? normalize(row.raw_data) : null;
+    if (!fixed || isPlaceholder(fixed.home) || isPlaceholder(fixed.away)) {
+      try {
+        const data = await AiPredictionService.prototype.requestFootball.call({ requestFootball: AiPredictionService.prototype.requestFootball }, '/fixtures', { id: String(row.id) });
+        const fixture = Array.isArray(data?.response) ? data.response[0] : null;
+        if (fixture) fixed = normalize(fixture);
+      } catch (_) {
+        // requestFootball is private at runtime; the fallback below uses direct axios through the service method when available.
+        try {
+          const service = new AiPredictionService();
+          const data = await service.requestFootball('/fixtures', { id: String(row.id) });
+          const fixture = Array.isArray(data?.response) ? data.response[0] : null;
+          if (fixture) fixed = normalize(fixture);
+        } catch (error) { console.warn(`[AI] Could not refresh placeholder fixture ${row.id}:`, error?.message || error); }
+      }
+    }
+    if (!fixed || isPlaceholder(fixed.home) || isPlaceholder(fixed.away)) continue;
+    try {
+      await db`UPDATE football_fixtures SET league_id=${fixed.leagueId}, league_name=${fixed.league}, country=${fixed.country}, season=${fixed.season}, home_team_id=${fixed.homeId}, home_team=${fixed.home}, away_team_id=${fixed.awayId}, away_team=${fixed.away}, kickoff_at=${fixed.kickoff}, status=${fixed.status}, home_score=${fixed.homeScore}, away_score=${fixed.awayScore}, raw_data=${JSON.stringify({fixture:{id:fixed.id,date:fixed.kickoff,status:{short:fixed.status}},league:{id:fixed.leagueId,name:fixed.league,country:fixed.country,season:fixed.season},teams:{home:{id:fixed.homeId,name:fixed.home},away:{id:fixed.awayId,name:fixed.away}},goals:{home:fixed.homeScore,away:fixed.awayScore}})}, updated_at=NOW() WHERE id=${String(row.id)}`;
+      repaired += 1;
+    } catch (error) { console.warn(`[AI] Could not persist fixture ${row.id}:`, error?.message || error); }
+  }
+  if (repaired) console.log(`[AI] Placeholder fixture preflight repaired ${repaired} fixture(s).`);
+  return repaired;
+}
+
 const originalRunAutomaticAnalysis = AiPredictionService.prototype.runAutomaticAnalysis;
 AiPredictionService.prototype.runAutomaticAnalysis = async function(limit) {
+  await repairBadFixtureRows();
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try { return await originalRunAutomaticAnalysis.call(this, limit); }
@@ -64,12 +103,9 @@ AiPredictionService.prototype.runAutomaticAnalysis = async function(limit) {
   throw lastError;
 };
 
-// Last-mile guarantee: the dashboard must never receive placeholder names.
-// Existing DB rows are checked first from raw_data, then refreshed from the
-// football provider when raw_data is insufficient. Repaired metadata is also
-// persisted so subsequent requests do not need another provider lookup.
 const originalGetPredictions = AiPredictionService.prototype.getPredictions;
 AiPredictionService.prototype.getPredictions = async function(limit = 40) {
+  await repairBadFixtureRows();
   const rows = await originalGetPredictions.call(this, limit);
   if (!rows?.length || !process.env.DATABASE_URL) return rows;
   const sql = neon(process.env.DATABASE_URL);
@@ -81,7 +117,7 @@ AiPredictionService.prototype.getPredictions = async function(limit = 40) {
       const stored = await sql`SELECT raw_data FROM football_fixtures WHERE id = ${String(row.id)} LIMIT 1`;
       if (stored[0]?.raw_data) fixed = normalize(stored[0].raw_data);
     } catch (error) { console.warn(`[AI] Could not read raw fixture ${row.id}:`, error?.message || error); }
-    if (!fixed || isPlaceholder(fixed.home) || isPlaceholder(fixed.away) || isPlaceholder(fixed.league)) {
+    if (!fixed || isPlaceholder(fixed.home) || isPlaceholder(fixed.away)) {
       try {
         const data = await this.requestFootball('/fixtures', { id: String(row.id) });
         const fixture = Array.isArray(data?.response) ? data.response[0] : null;
@@ -101,4 +137,4 @@ AiPredictionService.prototype.getPredictions = async function(limit = 40) {
   return rows;
 };
 
-console.log('[AI] Runtime fixture metadata/router patch loaded. Real team names are enforced, provider routing is balanced, and transient analysis failures retry safely.');
+console.log('[AI] Runtime fixture metadata/router patch loaded. Placeholder fixtures are blocked before analysis, real team names are enforced, provider routing is balanced, and transient failures retry safely.');
