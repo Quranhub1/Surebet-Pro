@@ -3,10 +3,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // Keep the production bundle friendly to older Android WebViews/Chrome,
-  // including devices commonly running Android 8.0/8.1.
+  // Android 8 commonly uses older Chrome/WebView engines. Keep the bundle
+  // conservative so startup does not depend on newer JavaScript syntax.
   build: {
-    target: 'es2017',
+    target: 'es2015',
   },
   server: {
     host: '0.0.0.0',
