@@ -27,22 +27,29 @@ export function PWAInstallPrompt() {
   const [ios, setIos] = useState(false);
 
   useEffect(() => {
-    // Delay all install-prompt work so old Android WebViews can finish booting first.
+    // Show the install card on supported browsers even when beforeinstallprompt
+    // has not fired yet. This is important on older Android/Chrome combinations.
     const timer = window.setTimeout(() => {
       try {
         if (isStandalone()) return;
 
+        const iosBrowser = isIOS();
+        setIos(iosBrowser);
+        setVisible(true);
+
         const handler = (event: Event) => {
-          try { event.preventDefault(); } catch { /* older engines may not support this */ }
+          try { event.preventDefault(); } catch { /* older engines */ }
           window.__surebetInstallPrompt = event;
           setInstallEvent(event);
           setVisible(true);
         };
 
         window.addEventListener('beforeinstallprompt', handler);
-        const shouldShowIOS = isIOS() && !isStandalone();
-        setIos(shouldShowIOS);
-        if (shouldShowIOS) setVisible(true);
+
+        // Recover an install event captured before this component mounted.
+        if (window.__surebetInstallPrompt) {
+          setInstallEvent(window.__surebetInstallPrompt);
+        }
 
         const installed = () => {
           setVisible(false);
@@ -57,7 +64,7 @@ export function PWAInstallPrompt() {
       } catch (error) {
         console.warn('[PWA] Install prompt disabled for this browser:', error);
       }
-    }, 1500);
+    }, 1000);
 
     return () => {
       window.clearTimeout(timer);
@@ -101,10 +108,14 @@ export function PWAInstallPrompt() {
         <div className="mt-3 rounded-xl bg-white/5 p-3 text-sm text-gray-300">
           In Safari, tap <Share className="mx-1 inline h-4 w-4" /> <strong>Share</strong>, then choose <strong>Add to Home Screen</strong>.
         </div>
-      ) : (
+      ) : installEvent ? (
         <button onClick={install} className="mt-3 w-full rounded-xl bg-[#39FF14] px-4 py-3 text-sm font-extrabold text-black transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#39FF14] focus:ring-offset-2 focus:ring-offset-[#111]">
           Install SureBet Pro
         </button>
+      ) : (
+        <div className="mt-3 rounded-xl bg-white/5 p-3 text-sm text-gray-300">
+          In Chrome, open the <strong>⋮</strong> menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+        </div>
       )}
     </div>
   );
