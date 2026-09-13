@@ -12,8 +12,7 @@ const navItems = [
 ];
 
 function hasAdminRole(role: unknown): boolean {
-  const normalizedRole = String(role ?? '').trim().toUpperCase();
-  return ['ADMIN', 'SUPERADMIN', 'OWNER', 'ADMINISTRATOR'].includes(normalizedRole);
+  return String(role ?? '').trim().toUpperCase() === 'ADMIN';
 }
 
 interface SidebarProps {
