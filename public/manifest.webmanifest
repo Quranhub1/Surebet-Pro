@@ -1,10 +1,17 @@
 {
   "name": "SureBet Pro",
   "short_name": "SureBet Pro",
-  "start_url": "/",
+  "description": "Live arbitrage scanning and betting analysis platform.",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#0a0a0a",
   "theme_color": "#0a0a0a",
-  "icons": []
+  "lang": "en",
+  "categories": ["sports", "business"],
+  "icons": [
+    {"src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any maskable"},
+    {"src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
 }
