@@ -9,6 +9,11 @@ import { Settings } from './pages/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Loader2, Menu } from 'lucide-react';
 
+function hasAdminRole(role: unknown): boolean {
+  const normalizedRole = String(role ?? '').trim().toUpperCase();
+  return ['ADMIN', 'SUPERADMIN', 'OWNER', 'ADMINISTRATOR'].includes(normalizedRole);
+}
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0a]"><Loader2 className="h-8 w-8 animate-spin text-[#39FF14]" /></div>;
@@ -20,8 +25,7 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0a]"><Loader2 className="h-8 w-8 animate-spin text-[#39FF14]" /></div>;
   if (!user) return <Navigate to="/auth" replace />;
-  const role = String(user.role || '').toUpperCase();
-  if (role !== 'ADMIN') return <Navigate to="/" replace />;
+  if (!hasAdminRole(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
