@@ -44,9 +44,8 @@ export class FootballDataService {
     return matches.filter(match => ['FINISHED', 'AWAITING_PENALTIES', 'FINISHED_AET', 'FINISHED_PEN'].includes(match.status) && match.homeScore != null && match.awayScore != null).sort((a, b) => new Date(b.kickoff).getTime() - new Date(a.kickoff).getTime());
   }
   public async getLiveMatches(): Promise<FootballDataMatch[]> {
-    // football-data.org exposes both IN_PLAY and PAUSED matches as live state.
-    // Query them together so half-time matches do not disappear from the dashboard.
-    const data = await this.request('/matches', { status: 'IN_PLAY,PAUSED' });
+    // LIVE is football-data.org's combined filter for IN_PLAY and PAUSED.
+    const data = await this.request('/matches', { status: 'LIVE' });
     return (Array.isArray(data?.matches) ? data.matches : []).map((match: any) => this.normalize(match));
   }
   private normalize(match: any): FootballDataMatch {
