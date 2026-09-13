@@ -11,6 +11,11 @@ const navItems = [
   { icon: ShieldAlert, label: 'Admin Dashboard', path: '/admin', adminOnly: true },
 ];
 
+function hasAdminRole(role: unknown): boolean {
+  const normalizedRole = String(role ?? '').trim().toUpperCase();
+  return ['ADMIN', 'SUPERADMIN', 'OWNER', 'ADMINISTRATOR'].includes(normalizedRole);
+}
+
 interface SidebarProps {
   collapsed: boolean;
   mobileOpen: boolean;
@@ -20,7 +25,7 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile }: SidebarProps) {
   const { profile, signOut } = useAuth();
-  const isAdmin = ['ADMIN', 'SUPERADMIN', 'OWNER'].includes(String(profile?.role || '').toUpperCase());
+  const isAdmin = hasAdminRole(profile?.role);
   const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin);
 
   return (
