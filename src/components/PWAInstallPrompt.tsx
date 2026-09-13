@@ -8,12 +8,17 @@ declare global {
 }
 
 function isStandalone() {
-  return window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  try {
+    const mediaStandalone = typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches;
+    const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    return mediaStandalone || iosStandalone;
+  } catch {
+    return false;
+  }
 }
 
 function isIOS() {
-  return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  return /iphone|ipad|ipod/i.test(window.navigator.userAgent || '');
 }
 
 export function PWAInstallPrompt() {
@@ -22,29 +27,42 @@ export function PWAInstallPrompt() {
   const [ios, setIos] = useState(false);
 
   useEffect(() => {
-    if (isStandalone()) return;
+    // Delay all install-prompt work so old Android WebViews can finish booting first.
+    const timer = window.setTimeout(() => {
+      try {
+        if (isStandalone()) return;
 
-    const handler = (event: Event) => {
-      event.preventDefault();
-      window.__surebetInstallPrompt = event;
-      setInstallEvent(event);
-      setVisible(true);
-    };
+        const handler = (event: Event) => {
+          try { event.preventDefault(); } catch { /* older engines may not support this */ }
+          window.__surebetInstallPrompt = event;
+          setInstallEvent(event);
+          setVisible(true);
+        };
 
-    window.addEventListener('beforeinstallprompt', handler);
-    const shouldShowIOS = isIOS() && !isStandalone();
-    setIos(shouldShowIOS);
-    if (shouldShowIOS) setVisible(true);
+        window.addEventListener('beforeinstallprompt', handler);
+        const shouldShowIOS = isIOS() && !isStandalone();
+        setIos(shouldShowIOS);
+        if (shouldShowIOS) setVisible(true);
 
-    const installed = () => {
-      setVisible(false);
-      setInstallEvent(null);
-    };
-    window.addEventListener('appinstalled', installed);
+        const installed = () => {
+          setVisible(false);
+          setInstallEvent(null);
+        };
+        window.addEventListener('appinstalled', installed);
+
+        (window as Window & { __surebetPwaCleanup?: () => void }).__surebetPwaCleanup = () => {
+          window.removeEventListener('beforeinstallprompt', handler);
+          window.removeEventListener('appinstalled', installed);
+        };
+      } catch (error) {
+        console.warn('[PWA] Install prompt disabled for this browser:', error);
+      }
+    }, 1500);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-      window.removeEventListener('appinstalled', installed);
+      window.clearTimeout(timer);
+      const cleanup = (window as Window & { __surebetPwaCleanup?: () => void }).__surebetPwaCleanup;
+      if (cleanup) cleanup();
     };
   }, []);
 
@@ -52,11 +70,17 @@ export function PWAInstallPrompt() {
 
   const install = async () => {
     if (!installEvent) return;
-    const promptEvent = installEvent as Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
-    await promptEvent.prompt();
-    await promptEvent.userChoice;
-    setVisible(false);
-    setInstallEvent(null);
+    try {
+      const promptEvent = installEvent as Event & { prompt?: () => Promise<void>; userChoice?: Promise<{ outcome: string }> };
+      if (!promptEvent.prompt) return;
+      await promptEvent.prompt();
+      if (promptEvent.userChoice) await promptEvent.userChoice;
+    } catch (error) {
+      console.warn('[PWA] Install prompt failed:', error);
+    } finally {
+      setVisible(false);
+      setInstallEvent(null);
+    }
   };
 
   return (
