@@ -34,7 +34,7 @@ function AppRoutes() {
   const { user } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  if (!user) return <Routes><Route path="/auth" element={<Auth />} /><Route path="*" element={<Navigate to="/auth" replace />} /></Routes>;
+  if (!user) return <><PWAInstallPrompt /><Routes><Route path="/auth" element={<Auth />} /><Route path="*" element={<Navigate to="/auth" replace />} /></Routes></>;
   return <div className="flex h-screen min-h-0 overflow-hidden bg-[#0a0a0a] font-sans text-white selection:bg-[#39FF14]/30 selection:text-[#39FF14]">
     <Sidebar collapsed={sidebarCollapsed} mobileOpen={mobileMenuOpen} onToggleCollapsed={() => setSidebarCollapsed(value => !value)} onCloseMobile={() => setMobileMenuOpen(false)} />
     <main className="relative min-w-0 flex-1 overflow-y-auto">
