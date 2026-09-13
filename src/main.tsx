@@ -3,11 +3,14 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+// Remove legacy PWA workers/caches left by earlier releases before the app starts.
+// This prevents an old cached JavaScript bundle from crashing after deployment.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(error => {
-      console.error('[PWA] Service worker registration failed:', error);
-    });
+    void navigator.serviceWorker.getRegistrations()
+      .then(registrations => Promise.all(registrations.map(registration => registration.unregister())))
+      .then(() => ('caches' in window ? caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))) : undefined))
+      .catch(error => console.error('[PWA] Startup cache cleanup failed:', error));
   });
 }
 
@@ -35,7 +38,7 @@ class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: bo
             </div>
             <h1 className="text-red-600 text-2xl font-extrabold mb-2 tracking-tight">Rendering Error Detected</h1>
             <p className="text-slate-500 mb-8 font-medium">An unexpected application error occurred.</p>
-            <div className="bg-slate-50 p-4 rounded-xl overflow-auto border border-slate-200 text-left mb-8"><pre className="text-slate-700 text-sm font-mono whitespace-pre-wrap">{this.state.error?.message || 'Unknown error'}</pre></div>
+            <div className="bg-slate-50 p-4 rounded-xl overflow-auto border border-slate-200 text-left mb-8"><pre className="text-slate-700 text-sm font-mono whitespace-pre-wrap">{this.state.error ? this.state.error.message : 'Unknown error'}</pre></div>
             <button onClick={() => window.location.reload()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">Reload Application</button>
           </div>
         </div>
@@ -45,7 +48,10 @@ class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: bo
   }
 }
 
-createRoot(document.getElementById('root')!).render(
+const root = document.getElementById('root');
+if (!root) throw new Error('Application root element was not found.');
+
+createRoot(root).render(
   <StrictMode>
     <GlobalErrorBoundary><App /></GlobalErrorBoundary>
   </StrictMode>,
