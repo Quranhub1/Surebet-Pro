@@ -27,8 +27,10 @@ async function ensureSubscriptionSchema(): Promise<void> {
 }
 
 async function isAdmin(userId: string): Promise<boolean> {
-  const rows = await sql`SELECT role FROM users WHERE id = ${userId} LIMIT 1`;
-  return String(rows[0]?.role || '').toUpperCase() === ADMIN_ROLE;
+  const rows = await sql`SELECT email, role FROM users WHERE id = ${userId} LIMIT 1`;
+  const email = String(rows[0]?.email || '').trim().toLowerCase();
+  const configuredAdmins = new Set((process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
+  return String(rows[0]?.role || '').toUpperCase() === ADMIN_ROLE || configuredAdmins.has(email);
 }
 
 export async function ensureUserSubscription(userId: string): Promise<SubscriptionInfo> {
