@@ -10,8 +10,8 @@ export interface AiMatchPrediction {
   aiProvider: AiProvider | null; aiModel: string | null;
 }
 
-const AI_BATCH_SIZE = 6;
-const AI_OUTPUT_TOKENS = 3000;
+const AI_BATCH_SIZE = 3;
+const AI_OUTPUT_TOKENS = 1800;
 const ANALYSIS_CACHE_MS = 12 * 60 * 60 * 1000;
 
 export class AiPredictionService {
@@ -53,7 +53,18 @@ export class AiPredictionService {
       const totalBatches = Math.ceil(enriched.length / AI_BATCH_SIZE);
       const primary = providerPreference[(batchNumber - 1) % providerPreference.length];
       const fallback = providerPreference.find(provider => provider !== primary);
-      const prompt = `Analyze ONLY these ${batch.length} upcoming fixtures. Preserve each fixture id exactly. For every fixture, use its completed history as a factual input. Do not substitute generic football knowledge for missing data. Historical matches are dated and ordered newest first.\n\n${JSON.stringify(batch, null, 2)}`;
+      const promptFixtures = batch.map(({ fixture, history }) => ({
+        fixture: {
+          id: fixture.id,
+          league: fixture.league,
+          country: fixture.country,
+          home: fixture.home,
+          away: fixture.away,
+          kickoff: fixture.kickoff,
+        },
+        completedHistory: history,
+      }));
+      const prompt = `Analyze ONLY these ${batch.length} upcoming fixtures. Preserve each fixture id exactly. For every fixture, use its completed history as a factual input. Do not substitute generic football knowledge for missing data. Historical matches are dated and ordered newest first.\n\n${JSON.stringify(promptFixtures, null, 2)}`;
       let raw = '';
       let usedProvider: AiProvider | null = null;
       try {
@@ -131,7 +142,7 @@ export class AiPredictionService {
 
   private async getStoredHistory(match: FootballDataMatch) {
     if (!match.homeId && !match.awayId) return [];
-    const rows = await sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${match.kickoff} AND status IN ('FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN') AND (home_team_id IN (${match.homeId}, ${match.awayId}) OR away_team_id IN (${match.homeId}, ${match.awayId})) ORDER BY kickoff_at DESC LIMIT 20`;
+    const rows = await sql`SELECT id, league_name AS league, home_team, away_team, kickoff_at, status, home_score, away_score FROM football_fixtures WHERE kickoff_at < ${match.kickoff} AND status IN ('FINISHED','AWAITING_PENALTIES','FINISHED_AET','FINISHED_PEN','FT','AET','PEN') AND (home_team_id IN (${match.homeId}, ${match.awayId}) OR away_team_id IN (${match.homeId}, ${match.awayId})) ORDER BY kickoff_at DESC LIMIT 10`;
     return rows.map((row: any) => ({ id: String(row.id), league: row.league, homeTeam: row.home_team, awayTeam: row.away_team, date: new Date(row.kickoff_at).toISOString(), status: row.status, homeScore: row.home_score == null ? null : Number(row.home_score), awayScore: row.away_score == null ? null : Number(row.away_score), result: Number(row.home_score) > Number(row.away_score) ? row.home_team : Number(row.away_score) > Number(row.home_score) ? row.away_team : 'Draw' }));
   }
 
