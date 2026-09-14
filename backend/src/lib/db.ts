@@ -61,6 +61,15 @@ export async function ensureDatabase(): Promise<void> {
   await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS quality_score double precision`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_updated ON football_ai_predictions (updated_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_quality ON football_ai_predictions (quality_score DESC NULLS LAST)`;
+  await sql`CREATE OR REPLACE FUNCTION calculate_prediction_quality() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.quality_score := LEAST(100, GREATEST(0,
+    COALESCE(NEW.confidence, 50) * 0.45
+    + CASE WHEN NEW.home_win IS NOT NULL AND NEW.draw IS NOT NULL AND NEW.away_win IS NOT NULL THEN LEAST(100, GREATEST(0, 100 - ABS((NEW.home_win + NEW.draw + NEW.away_win) - 100) * 4)) ELSE 45 END * 0.10
+    + CASE WHEN jsonb_array_length(COALESCE(NEW.key_factors, '[]'::jsonb)) >= 5 THEN 100 WHEN jsonb_array_length(COALESCE(NEW.key_factors, '[]'::jsonb)) >= 3 THEN 85 WHEN jsonb_array_length(COALESCE(NEW.key_factors, '[]'::jsonb)) >= 1 THEN 65 ELSE 35 END * 0.15
+    + CASE WHEN length(COALESCE(NEW.analysis, '')) >= 240 THEN 100 WHEN length(COALESCE(NEW.analysis, '')) >= 140 THEN 85 WHEN length(COALESCE(NEW.analysis, '')) >= 80 THEN 65 ELSE 35 END * 0.15
+    + CASE WHEN NEW.predicted_home_goals IS NOT NULL AND NEW.predicted_away_goals IS NOT NULL THEN 90 ELSE 45 END * 0.15)); RETURN NEW; END; $$`;
+  await sql`DROP TRIGGER IF EXISTS trg_prediction_quality ON football_ai_predictions`;
+  await sql`CREATE TRIGGER trg_prediction_quality BEFORE INSERT OR UPDATE ON football_ai_predictions FOR EACH ROW EXECUTE FUNCTION calculate_prediction_quality()`;
+  await sql`UPDATE football_ai_predictions SET quality_score = LEAST(100, GREATEST(0, COALESCE(confidence, 50) * 0.45 + CASE WHEN home_win IS NOT NULL AND draw IS NOT NULL AND away_win IS NOT NULL THEN LEAST(100, GREATEST(0, 100 - ABS((home_win + draw + away_win) - 100) * 4)) ELSE 45 END * 0.10 + CASE WHEN jsonb_array_length(COALESCE(key_factors, '[]'::jsonb)) >= 5 THEN 100 WHEN jsonb_array_length(COALESCE(key_factors, '[]'::jsonb)) >= 3 THEN 85 WHEN jsonb_array_length(COALESCE(key_factors, '[]'::jsonb)) >= 1 THEN 65 ELSE 35 END * 0.15 + CASE WHEN length(COALESCE(analysis, '')) >= 240 THEN 100 WHEN length(COALESCE(analysis, '')) >= 140 THEN 85 WHEN length(COALESCE(analysis, '')) >= 80 THEN 65 ELSE 35 END * 0.15 + CASE WHEN predicted_home_goals IS NOT NULL AND predicted_away_goals IS NOT NULL THEN 90 ELSE 45 END * 0.15)) WHERE quality_score IS NULL`;
 
   await sql`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, email text UNIQUE NOT NULL, password_hash text, name text NOT NULL, role text NOT NULL DEFAULT 'USER', google_sub text UNIQUE, created_at timestamptz NOT NULL DEFAULT now())`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub text`;
