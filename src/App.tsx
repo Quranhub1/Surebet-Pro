@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { PaymentPrompt } from './components/PaymentPrompt';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
+import { LiveMatchCentre } from './components/LiveMatchCentre';
 import { Dashboard } from './pages/Dashboard';
 import { History } from './pages/History';
 import { Admin } from './pages/Admin';
@@ -32,6 +33,7 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
 
 function AppRoutes() {
   const { user } = useAuth();
+  const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   if (!user) return <><PWAInstallPrompt /><Routes><Route path="/auth" element={<Auth />} /><Route path="*" element={<Navigate to="/auth" replace />} /></Routes></>;
@@ -41,6 +43,7 @@ function AppRoutes() {
       <div className="sticky top-0 z-30 flex h-14 items-center border-b border-[#222] bg-[#0a0a0a]/95 px-4 backdrop-blur md:hidden"><button onClick={() => setMobileMenuOpen(true)} aria-label="Open navigation" className="rounded-lg p-2 text-gray-300 hover:bg-[#1a1a1a] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#39FF14]"><Menu className="h-6 w-6" /></button><span className="ml-3 text-lg font-extrabold tracking-tight">Football<span className="text-[#39FF14]">AI</span></span></div>
       <PaymentPrompt />
       <PWAInstallPrompt />
+      {location.pathname === '/' && <LiveMatchCentre />}
       <Routes>
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
