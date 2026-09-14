@@ -43,8 +43,9 @@ function decodeLiveData(crest: string | null): Partial<LiveMatch> | null {
   const marker = crest.indexOf(LIVE_MARKER);
   if (marker < 0) return null;
   try {
-    const encoded = crest.slice(marker + LIVE_MARKER.length);
-    const binary = atob(encoded.replace(/-/g, '+').replace(/_/g, '/'));
+    let encoded = crest.slice(marker + LIVE_MARKER.length).replace(/-/g, '+').replace(/_/g, '/');
+    while (encoded.length % 4 !== 0) encoded += '=';
+    const binary = atob(encoded);
     const json = decodeURIComponent(Array.from(binary).map(char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`).join(''));
     return JSON.parse(json) as Partial<LiveMatch>;
   } catch {
