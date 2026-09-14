@@ -1,0 +1,34 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { BrainCircuit, CheckCircle2, Gauge, Target, TrendingUp, XCircle } from 'lucide-react';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+type Row = { homeTeam: string; awayTeam: string; confidence: number | null; predictionCorrect: boolean | null; scoreCorrect: boolean | null; aiProvider: string | null; kickoffAt: string | null; predictedWinner: string | null; actualResult: string | null; };
+const pct = (n: number, d: number) => d ? Math.round(n / d * 100) : null;
+
+export function Performance() {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { fetch(`${API_BASE_URL}/api/football/history?limit=500`, { cache: 'no-store' }).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Failed to load performance data'); setRows(Array.isArray(data.history) ? data.history : []); }).catch(() => setRows([])).finally(() => setLoading(false)); }, []);
+
+  const stats = useMemo(() => {
+    const evaluated = rows.filter(r => r.predictionCorrect !== null);
+    const correct = evaluated.filter(r => r.predictionCorrect).length;
+    const exact = evaluated.filter(r => r.scoreCorrect).length;
+    const bands = [{ label: 'High confidence', min: 75 }, { label: 'Medium confidence', min: 55 }, { label: 'Low confidence', min: 0 }].map((band, i, all) => { const max = i === 0 ? 101 : all[i - 1].min; const list = evaluated.filter(r => r.confidence != null && r.confidence >= band.min && r.confidence < max); return { ...band, total: list.length, correct: list.filter(r => r.predictionCorrect).length, accuracy: pct(list.filter(r => r.predictionCorrect).length, list.length) }; });
+    const providers = ['gemini', 'groq'].map(provider => { const list = evaluated.filter(r => r.aiProvider === provider); const wins = list.filter(r => r.predictionCorrect).length; return { provider, total: list.length, accuracy: pct(wins, list.length), exact: list.filter(r => r.scoreCorrect).length }; });
+    const recent = [...evaluated].sort((a, b) => new Date(b.kickoffAt || 0).getTime() - new Date(a.kickoffAt || 0).getTime()).slice(0, 20);
+    return { evaluated, correct, exact, accuracy: pct(correct, evaluated.length), bands, providers, recent };
+  }, [rows]);
+
+  return <div className="mx-auto w-full max-w-7xl p-5 pb-16 md:p-8">
+    <header className="mb-8"><div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#39FF14]/10 text-[#39FF14]"><BrainCircuit className="h-6 w-6" /></div><div><h1 className="text-3xl font-extrabold text-white">Analysis Performance</h1><p className="mt-1 text-sm text-gray-400">Measured only from saved AI analysis and completed football results. No odds or bookmaker data influence these metrics.</p></div></div></header>
+    {loading ? <div className="rounded-2xl border border-[#292929] bg-[#111] p-10 text-center text-gray-400">Loading verified analysis results...</div> : <>
+      <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">{[['Evaluated', stats.evaluated.length], ['Winner accuracy', stats.accuracy == null ? '—' : `${stats.accuracy}%`], ['Correct winners', stats.correct], ['Exact scores', stats.exact]].map(([label, value]) => <div key={String(label)} className="rounded-2xl border border-[#292929] bg-[#111] p-5"><div className="text-xs font-bold uppercase tracking-wider text-gray-500">{label}</div><div className="mt-2 text-2xl font-black text-white">{value}</div></div>)}</div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl border border-[#292929] bg-[#111] p-5"><div className="mb-5 flex items-center gap-2"><Gauge className="h-5 w-5 text-[#39FF14]" /><h2 className="font-bold">Confidence reliability</h2></div><div className="space-y-3">{stats.bands.map(b => <div key={b.label} className="rounded-xl border border-[#292929] bg-[#151515] p-4"><div className="flex items-center justify-between"><span className="font-semibold text-white">{b.label}</span><span className="font-black text-[#39FF14]">{b.accuracy == null ? 'No data' : `${b.accuracy}%`}</span></div><div className="mt-2 flex justify-between text-xs text-gray-500"><span>{b.total} evaluated</span><span>{b.correct} correct</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#292929]"><div className="h-full rounded-full bg-[#39FF14]" style={{ width: `${b.accuracy || 0}%` }} /></div></div>)}</div></section>
+        <section className="rounded-2xl border border-[#292929] bg-[#111] p-5"><div className="mb-5 flex items-center gap-2"><TrendingUp className="h-5 w-5 text-[#39FF14]" /><h2 className="font-bold">AI provider performance</h2></div><div className="grid gap-3 sm:grid-cols-2">{stats.providers.map(p => <div key={p.provider} className="rounded-xl border border-[#292929] bg-[#151515] p-5"><div className="flex justify-between"><span className="font-bold capitalize">{p.provider}</span><span className="text-xl font-black text-[#39FF14]">{p.accuracy == null ? '—' : `${p.accuracy}%`}</span></div><p className="mt-3 text-xs text-gray-500">{p.total} evaluated · {p.exact} exact scores</p></div>)}</div><div className="mt-4 rounded-xl border border-[#39FF14]/20 bg-[#39FF14]/5 p-4 text-xs leading-5 text-gray-400">This comparison measures prediction accuracy only. Provider selection does not use bookmaker prices or betting-market signals.</div></section>
+      </div>
+      <section className="mt-4 rounded-2xl border border-[#292929] bg-[#111] p-5"><div className="mb-4 flex items-center gap-2"><Target className="h-5 w-5 text-[#39FF14]" /><h2 className="font-bold">Recent evaluated analyses</h2></div>{stats.recent.length === 0 ? <p className="text-sm text-gray-500">Completed analyses will appear here after results are evaluated.</p> : <div className="space-y-2">{stats.recent.map((r, i) => <div key={`${r.homeTeam}-${r.awayTeam}-${i}`} className="flex flex-col gap-2 rounded-xl border border-[#292929] bg-[#151515] p-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="text-sm font-bold text-white">{r.homeTeam} <span className="text-gray-600">vs</span> {r.awayTeam}</div><div className="mt-1 text-xs text-gray-500">Prediction: {r.predictedWinner || '—'} · Confidence: {r.confidence == null ? '—' : `${r.confidence}%`}</div></div><div className="flex items-center gap-2 text-xs">{r.predictionCorrect ? <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Correct</span> : <span className="flex items-center gap-1 text-red-400"><XCircle className="h-4 w-4" /> Missed</span>}{r.scoreCorrect && <span className="rounded-full bg-[#39FF14]/10 px-2 py-1 font-bold text-[#39FF14]">Exact</span>}</div></div>)}</div>}</section>
+    </>}
+  </div>;
+}
