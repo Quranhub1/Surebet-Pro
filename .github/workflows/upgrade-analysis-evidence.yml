@@ -1,0 +1,44 @@
+name: Upgrade analysis evidence
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Strengthen football evidence prompt and history window
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('backend/src/services/AiPredictionService.ts')
+          s = p.read_text()
+          s = s.replace("await this.syncCompletedHistory(30);", "await this.syncCompletedHistory(365);", 2)
+          old = "Use the supplied completed-match history as evidence for each fixture: recent results, home/away performance, goals scored/conceded and head-to-head context when available. Weight recent matches more heavily than older results. Do not invent injuries, lineups, statistics, form or results. A historical result is evidence, not a guarantee."
+          new = "Use the supplied completed-match history as the primary factual evidence for each fixture. Explicitly separate: last-5 overall form for each team, home-only form for the home team, away-only form for the away team, goals scored/conceded averages, win/draw/loss rates, goal difference, and head-to-head results when available. Weight the newest matches more heavily, but never treat a small sample as strong evidence. Do not invent injuries, lineups, statistics, form or results. If evidence is sparse or conflicting, lower confidence and keep probabilities closer together. A historical result is evidence, not a guarantee."
+          if old not in s:
+              raise SystemExit('Expected evidence prompt text was not found; refusing unsafe edit.')
+          s = s.replace(old, new, 1)
+          old2 = "analysis must be 2-4 sentences and explicitly reflect relevant historical evidence when history exists. keyFactors must contain 3-6 short evidence-based points. confidence and probabilities are 0-100; probabilities should sum to approximately 100."
+          new2 = "analysis must be 3-5 sentences and explicitly compare the strongest relevant evidence for both teams. keyFactors must contain 4-6 short evidence-based points and should include concrete recent-result or goal-rate observations when available. confidence must reflect evidence depth and agreement, not personal certainty: cap confidence at 60 when fewer than 3 relevant completed matches exist for either team, and avoid extreme probabilities when the evidence is sparse or conflicting. confidence and probabilities are 0-100; probabilities should sum to approximately 100."
+          if old2 not in s:
+              raise SystemExit('Expected confidence instruction was not found; refusing unsafe edit.')
+          s = s.replace(old2, new2, 1)
+          p.write_text(s)
+      - name: Commit production change and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/services/AiPredictionService.ts
+          git commit -m 'strengthen evidence-based football analysis' || true
+          rm -f .github/workflows/upgrade-analysis-evidence.yml
+          git add .github/workflows/upgrade-analysis-evidence.yml
+          git commit -m 'remove temporary analysis upgrade workflow' || true
+          git push
