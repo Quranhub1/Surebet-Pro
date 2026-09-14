@@ -57,8 +57,10 @@ export async function ensureDatabase(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_kickoff ON football_fixtures (kickoff_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_fixtures_status ON football_fixtures (status, kickoff_at DESC)`;
 
-  await sql`CREATE TABLE IF NOT EXISTS football_ai_predictions (fixture_id text PRIMARY KEY, winner text, advice text, analysis text, key_factors jsonb NOT NULL DEFAULT '[]'::jsonb, confidence double precision, home_win double precision, draw double precision, away_win double precision, under_over text, predicted_home_goals double precision, predicted_away_goals double precision, ai_provider text, ai_model text, source_prediction jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`;
+  await sql`CREATE TABLE IF NOT EXISTS football_ai_predictions (fixture_id text PRIMARY KEY, winner text, advice text, analysis text, key_factors jsonb NOT NULL DEFAULT '[]'::jsonb, confidence double precision, home_win double precision, draw double precision, away_win double precision, under_over text, predicted_home_goals double precision, predicted_away_goals double precision, ai_provider text, ai_model text, source_prediction jsonb, quality_score double precision, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`;
+  await sql`ALTER TABLE football_ai_predictions ADD COLUMN IF NOT EXISTS quality_score double precision`;
   await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_updated ON football_ai_predictions (updated_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_football_ai_predictions_quality ON football_ai_predictions (quality_score DESC NULLS LAST)`;
 
   await sql`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, email text UNIQUE NOT NULL, password_hash text, name text NOT NULL, role text NOT NULL DEFAULT 'USER', google_sub text UNIQUE, created_at timestamptz NOT NULL DEFAULT now())`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub text`;
