@@ -60,8 +60,17 @@ export class FootballDataService {
     }).then(response => response.data);
   }
   public isConfigured(): boolean { return Boolean(this.token); }
-  public async getMatches(from: string, to: string, competitions = FREE_COMPETITION_CODES): Promise<FootballDataMatch[]> {
-    const data = await this.request('/matches', { dateFrom: from, dateTo: to, competitions: competitions.join(',') });
+
+  /**
+   * Fetch the full match surface allowed by the configured football-data.org
+   * account for the requested date range. Passing no competition filter is
+   * intentional: hard-coding a small league list silently dropped valid daily
+   * fixtures before the AI analysis stage ever saw them.
+   */
+  public async getMatches(from: string, to: string, competitions?: string[]): Promise<FootballDataMatch[]> {
+    const params: Record<string, string> = { dateFrom: from, dateTo: to };
+    if (competitions?.length) params.competitions = competitions.join(',');
+    const data = await this.request('/matches', params);
     return (Array.isArray(data?.matches) ? data.matches : []).map((match: any) => this.normalize(match));
   }
   public async getUpcomingMatches(days = 7): Promise<FootballDataMatch[]> {
