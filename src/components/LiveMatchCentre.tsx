@@ -1,162 +1,55 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-interface LiveEvent {
-  type: 'GOAL' | 'CARD' | 'SUBSTITUTION';
-  minute: number | null;
-  injuryTime: number | null;
-  teamId: number | null;
-  team: string | null;
-  player: string | null;
-  playerIn: string | null;
-  playerOut: string | null;
-  card: string | null;
-  goalType: string | null;
-  assist: string | null;
-  homeScore: number | null;
-  awayScore: number | null;
-}
-
-interface LiveMatch {
-  id: string;
-  league: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeCrest: string | null;
-  awayCrest: string | null;
-  homeScore: number | null;
-  awayScore: number | null;
-  status: string;
-  startTime: string;
-  updatedAt: string;
-  minute: number | null;
-  injuryTime: number | null;
-  duration: string | null;
-  lastUpdated: string | null;
-  events: LiveEvent[];
-}
-
+interface LiveEvent { type: 'GOAL' | 'CARD' | 'SUBSTITUTION'; minute: number | null; injuryTime: number | null; teamId: number | null; team: string | null; player: string | null; playerIn: string | null; playerOut: string | null; card: string | null; goalType: string | null; assist: string | null; homeScore: number | null; awayScore: number | null; }
+interface LiveMatch { id: string; league: string; homeTeam: string; awayTeam: string; homeCrest: string | null; awayCrest: string | null; homeScore: number | null; awayScore: number | null; status: string; startTime: string; updatedAt: string; minute: number | null; injuryTime: number | null; duration: string | null; lastUpdated: string | null; events: LiveEvent[]; }
+interface Prediction { id: string; winner: string | null; confidence: number | null; predictedHomeGoals: number | null; predictedAwayGoals: number | null; homeWin: number | null; draw: number | null; awayWin: number | null; }
+interface FinishedLiveMatch { id: string; homeTeam: string; awayTeam: string; homeScore: number; awayScore: number; league: string; finishedAt: number; }
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const LIVE_MARKER = '#sb-live=';
-
-function decodeLiveData(crest: string | null): Partial<LiveMatch> | null {
-  if (!crest) return null;
-  const marker = crest.indexOf(LIVE_MARKER);
-  if (marker < 0) return null;
-  try {
-    let encoded = crest.slice(marker + LIVE_MARKER.length).replace(/-/g, '+').replace(/_/g, '/');
-    while (encoded.length % 4 !== 0) encoded += '=';
-    const binary = atob(encoded);
-    const json = decodeURIComponent(Array.from(binary).map(char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`).join(''));
-    return JSON.parse(json) as Partial<LiveMatch>;
-  } catch {
-    return null;
-  }
-}
-
-function cleanCrest(crest: string | null): string | null {
-  if (!crest) return null;
-  const marker = crest.indexOf(LIVE_MARKER);
-  return marker >= 0 ? crest.slice(0, marker) : crest;
-}
-
-function eventMinute(event: LiveEvent) {
-  if (event.minute == null) return '';
-  return `${event.minute}${event.injuryTime ? `+${event.injuryTime}` : ''}'`;
-}
-
-function eventLabel(event: LiveEvent) {
-  if (event.type === 'GOAL') return `${event.player || 'Goal'}${event.goalType && event.goalType !== 'REGULAR' ? ` (${event.goalType.toLowerCase()})` : ''}`;
-  if (event.type === 'CARD') return `${event.card || 'CARD'} · ${event.player || 'Player'}`;
-  return `${event.playerOut || 'Player'} → ${event.playerIn || 'Player'}`;
-}
-
-function statusLabel(match: LiveMatch, nowMs = Date.now()) {
-  if (match.status === 'PAUSED') return 'HALF-TIME';
-  if (match.status === 'EXTRA_TIME') return 'EXTRA TIME';
-  if (match.status === 'PENALTY_SHOOTOUT') return 'PENALTIES';
-  if (match.status === 'FINISHED') return 'FULL-TIME';
-  const minute = displayMinute(match, nowMs);
-  if (minute != null) return `${minute}${match.injuryTime ? `+${match.injuryTime}` : ''}'`;
-  return 'LIVE';
-}
-
-function displayMinute(match: LiveMatch, nowMs = Date.now()): number | null {
-  if (match.minute == null) return null;
-  if (!['IN_PLAY', 'EXTRA_TIME'].includes(match.status)) return match.minute;
-  const anchor = match.lastUpdated ? Date.parse(match.lastUpdated) : Date.parse(match.updatedAt);
-  if (!Number.isFinite(anchor)) return match.minute;
-  const elapsedMinutes = Math.max(0, Math.floor((nowMs - anchor) / 60000));
-  return match.minute + elapsedMinutes;
-}
-
+const POLL_MS = 10000;
+function decodeLiveData(crest: string | null): Partial<LiveMatch> | null { if (!crest) return null; const marker = crest.indexOf(LIVE_MARKER); if (marker < 0) return null; try { let encoded = crest.slice(marker + LIVE_MARKER.length).replace(/-/g, '+').replace(/_/g, '/'); while (encoded.length % 4 !== 0) encoded += '='; const binary = atob(encoded); const json = decodeURIComponent(Array.from(binary).map(char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`).join('')); return JSON.parse(json) as Partial<LiveMatch>; } catch { return null; } }
+function cleanCrest(crest: string | null): string | null { if (!crest) return null; const marker = crest.indexOf(LIVE_MARKER); return marker >= 0 ? crest.slice(0, marker) : crest; }
+function displayMinute(match: LiveMatch, nowMs: number): number | null { if (match.minute == null) return null; if (!['IN_PLAY', 'EXTRA_TIME'].includes(match.status)) return match.minute; const anchor = match.lastUpdated ? Date.parse(match.lastUpdated) : Date.parse(match.updatedAt); if (!Number.isFinite(anchor)) return match.minute; return match.minute + Math.max(0, Math.floor((nowMs - anchor) / 60000)); }
+function eventMinute(event: LiveEvent) { if (event.minute == null) return ''; return `${event.minute}${event.injuryTime ? `+${event.injuryTime}` : ''}'`; }
+function eventLabel(event: LiveEvent) { if (event.type === 'GOAL') return `${event.player || 'Goal'}${event.goalType && event.goalType !== 'REGULAR' ? ` (${event.goalType.toLowerCase()})` : ''}`; if (event.type === 'CARD') return `${event.card || 'CARD'} · ${event.player || 'Player'}`; return `${event.playerOut || 'Player'} → ${event.playerIn || 'Player'}`; }
+function statusLabel(match: LiveMatch, nowMs: number) { if (match.status === 'PAUSED') return 'HALF-TIME'; if (match.status === 'EXTRA_TIME') return 'EXTRA TIME'; if (match.status === 'PENALTY_SHOOTOUT') return 'PENALTIES'; const minute = displayMinute(match, nowMs); return minute == null ? 'LIVE' : `${minute}${match.injuryTime ? `+${match.injuryTime}` : ''}'`; }
+function winnerState(match: LiveMatch, prediction?: Prediction) { if (!prediction || match.homeScore == null || match.awayScore == null) return null; if (match.homeScore === match.awayScore) return prediction.winner?.toLowerCase().includes('draw') ? 'ON TRACK' : 'DRAW LIVE'; const liveWinner = match.homeScore > match.awayScore ? match.homeTeam : match.awayTeam; return prediction.winner && liveWinner.toLowerCase() === prediction.winner.toLowerCase() ? 'ON TRACK' : 'AGAINST PREDICTION'; }
+function momentum(match: LiveMatch) { const nowMinute = match.minute ?? 90; const recent = match.events.filter(event => event.minute != null && event.minute >= nowMinute - 15); let home = 0; let away = 0; for (const event of recent) { const weight = event.type === 'GOAL' ? 3 : event.type === 'CARD' ? 1 : 0.5; if (event.team === match.homeTeam) home += weight; if (event.team === match.awayTeam) away += weight; } if (home === away) return 'EVEN'; return home > away ? `HOME +${Math.round(home - away)}` : `AWAY +${Math.round(away - home)}`; }
+function liveInsight(match: LiveMatch, prediction?: Prediction) { const home = match.homeScore ?? 0; const away = match.awayScore ?? 0; const latestGoal = [...match.events].sort((a, b) => (b.minute ?? -1) - (a.minute ?? -1)).find(event => event.type === 'GOAL'); if (latestGoal?.team) return `${latestGoal.team} changed the game. Current score is ${home}-${away}.`; if (prediction?.predictedHomeGoals != null && prediction?.predictedAwayGoals != null) { const expected = `${prediction.predictedHomeGoals}-${prediction.predictedAwayGoals}`; if (home === prediction.predictedHomeGoals && away === prediction.predictedAwayGoals) return `Live score matches the AI expected score (${expected}).`; if (home > prediction.predictedHomeGoals || away > prediction.predictedAwayGoals) return `The match is running ahead of the AI goal expectation (${expected}).`; return `The match is still below the AI expected score (${expected}).`; } return `Live score: ${home}-${away}.`; }
 export function LiveMatchCentre() {
-  const [matches, setMatches] = useState<LiveMatch[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-  const [clockNow, setClockNow] = useState(() => Date.now());
-
+  const [matches, setMatches] = useState<LiveMatch[]>([]); const [predictions, setPredictions] = useState<Record<string, Prediction>>({}); const [updatedAt, setUpdatedAt] = useState<string | null>(null); const [error, setError] = useState(false); const [clockNow, setClockNow] = useState(() => Date.now()); const [recentlyFinished, setRecentlyFinished] = useState<FinishedLiveMatch[]>([]); const [flashIds, setFlashIds] = useState<Record<string, number>>({});
   const fetchLive = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/football/live`, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`Live feed ${response.status}`);
-      const payload = await response.json();
-      const next = (Array.isArray(payload.matches) ? payload.matches : []).map((match: any): LiveMatch => {
-        const liveData = decodeLiveData(match.homeCrest) || decodeLiveData(match.awayCrest) || {};
-        return {
-          id: String(match.id), league: String(match.league || 'Football'), homeTeam: String(match.homeTeam || 'Home'), awayTeam: String(match.awayTeam || 'Away'),
-          homeCrest: cleanCrest(match.homeCrest || null), awayCrest: cleanCrest(match.awayCrest || null),
-          homeScore: match.homeScore == null ? null : Number(match.homeScore), awayScore: match.awayScore == null ? null : Number(match.awayScore),
-          status: String(match.status || 'IN_PLAY'), startTime: String(match.startTime || ''), updatedAt: String(payload.updatedAt || new Date().toISOString()),
-          minute: liveData.minute == null ? null : Number(liveData.minute), injuryTime: liveData.injuryTime == null ? null : Number(liveData.injuryTime), duration: liveData.duration || null,
-          lastUpdated: liveData.lastUpdated || null, events: Array.isArray(liveData.events) ? liveData.events : [],
-        };
-      });
-      setMatches(next);
-      setUpdatedAt(payload.updatedAt || new Date().toISOString());
-      setClockNow(Date.now());
-      setError(false);
-    } catch (err) {
-      console.error('[LiveMatchCentre] refresh failed', err);
-      setError(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchLive();
-    const timer = window.setInterval(() => void fetchLive(), 15000);
-    return () => window.clearInterval(timer);
-  }, [fetchLive]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const visibleMatches = useMemo(() => matches.filter(match => ['IN_PLAY', 'PAUSED', 'EXTRA_TIME', 'PENALTY_SHOOTOUT'].includes(match.status)), [matches]);
-  if (visibleMatches.length === 0) return null;
-
+      const [liveResponse, predictionResponse] = await Promise.all([fetch(`${API_BASE_URL}/api/football/live`, { cache: 'no-store' }), fetch(`${API_BASE_URL}/api/football/predictions`, { cache: 'no-store' })]);
+      if (!liveResponse.ok) throw new Error(`Live feed ${liveResponse.status}`);
+      const livePayload = await liveResponse.json();
+      const next: LiveMatch[] = (Array.isArray(livePayload.matches) ? livePayload.matches : []).map((match: any): LiveMatch => { const liveData = decodeLiveData(match.homeCrest) || decodeLiveData(match.awayCrest) || {}; return { id: String(match.id), league: String(match.league || 'Football'), homeTeam: String(match.homeTeam || 'Home'), awayTeam: String(match.awayTeam || 'Away'), homeCrest: cleanCrest(match.homeCrest || null), awayCrest: cleanCrest(match.awayCrest || null), homeScore: match.homeScore == null ? null : Number(match.homeScore), awayScore: match.awayScore == null ? null : Number(match.awayScore), status: String(match.status || 'IN_PLAY'), startTime: String(match.startTime || ''), updatedAt: String(livePayload.updatedAt || new Date().toISOString()), minute: match.minute == null ? (liveData.minute == null ? null : Number(liveData.minute)) : Number(match.minute), injuryTime: match.injuryTime == null ? (liveData.injuryTime == null ? null : Number(liveData.injuryTime)) : Number(match.injuryTime), duration: match.duration || liveData.duration || null, lastUpdated: match.lastUpdated || liveData.lastUpdated || null, events: Array.isArray(match.events) ? match.events : Array.isArray(match.liveEvents) ? match.liveEvents : Array.isArray(liveData.events) ? liveData.events : [] }; });
+      const previous = new Map(matches.map(match => [match.id, match])); const flashes: Record<string, number> = {}; next.forEach(match => { const old = previous.get(match.id); if (old && (old.homeScore !== match.homeScore || old.awayScore !== match.awayScore)) flashes[match.id] = Date.now(); }); if (Object.keys(flashes).length) setFlashIds(current => ({ ...current, ...flashes }));
+      const nextIds = new Set(next.map(match => match.id)); const finished = matches.filter(match => !nextIds.has(match.id) && match.homeScore != null && match.awayScore != null).map(match => ({ id: match.id, homeTeam: match.homeTeam, awayTeam: match.awayTeam, homeScore: match.homeScore as number, awayScore: match.awayScore as number, league: match.league, finishedAt: Date.now() })); if (finished.length) setRecentlyFinished(current => [...finished, ...current.filter(item => !finished.some(done => done.id === item.id))].slice(0, 8));
+      setMatches(next.filter(match => ['IN_PLAY', 'PAUSED', 'EXTRA_TIME', 'PENALTY_SHOOTOUT'].includes(match.status))); setUpdatedAt(livePayload.updatedAt || new Date().toISOString());
+      if (predictionResponse.ok) { const predictionPayload = await predictionResponse.json(); const map: Record<string, Prediction> = {}; for (const item of Array.isArray(predictionPayload.predictions) ? predictionPayload.predictions : []) map[String(item.id)] = item; setPredictions(map); }
+      setClockNow(Date.now()); setError(false);
+    } catch (err) { console.error('[LiveMatchCentre] refresh failed', err); setError(true); }
+  }, [matches]);
+  useEffect(() => { void fetchLive(); const timer = window.setInterval(() => void fetchLive(), POLL_MS); return () => window.clearInterval(timer); }, [fetchLive]);
+  useEffect(() => { const timer = window.setInterval(() => setClockNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => { const timer = window.setInterval(() => setRecentlyFinished(current => current.filter(item => Date.now() - item.finishedAt < 120000)), 15000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => { const timer = window.setInterval(() => setFlashIds(current => Object.fromEntries(Object.entries(current).filter(([, at]) => Date.now() - at < 7000))), 1000); return () => window.clearInterval(timer); }, []);
+  const groups = useMemo(() => { const map = new Map<string, LiveMatch[]>(); for (const match of matches) map.set(match.league, [...(map.get(match.league) || []), match]); return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)); }, [matches]);
+  const alerts = useMemo(() => matches.flatMap(match => match.events.filter(event => event.type === 'GOAL' || event.type === 'CARD').map(event => ({ ...event, match }))).sort((a, b) => (b.minute ?? -1) - (a.minute ?? -1)).slice(0, 8), [matches]);
+  if (matches.length === 0 && recentlyFinished.length === 0) return null;
   return <section className="mx-5 md:mx-10 mt-4 mb-2 rounded-2xl border border-[#39FF14]/20 bg-[#0e110e] overflow-hidden">
-    <div className="px-4 py-3 border-b border-[#263026] flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#39FF14] opacity-60" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#39FF14]" /></span><h2 className="text-sm font-black">LIVE MATCH CENTRE</h2><span className="text-[10px] text-[#7f8b7f]">scores, clock and events refresh every 15 seconds</span></div>
-      {updatedAt && <span className="hidden sm:block text-[10px] text-[#7f8b7f]">Checked {new Date(updatedAt).toLocaleTimeString()}</span>}
-    </div>
-    {error && <div className="px-4 py-2 text-[11px] text-amber-300 border-b border-[#263026]">Live feed temporarily unavailable. The last successful state remains visible until the next refresh.</div>}
-    <div className="grid lg:grid-cols-2 gap-px bg-[#263026]">
-      {visibleMatches.map(match => {
-        const events = [...match.events].sort((a, b) => (b.minute ?? -1) - (a.minute ?? -1));
-        const liveMinute = displayMinute(match, clockNow);
-        return <article key={match.id} className="bg-[#101310] p-4">
-          <div className="flex items-center justify-between gap-3 mb-3"><div><p className="text-[10px] uppercase text-[#7f8b7f]">{match.league}</p><p className="text-xs font-black text-[#39FF14] mt-0.5">{statusLabel(match, clockNow)}</p></div><span className="text-[10px] text-[#7f8b7f]">{match.duration === 'EXTRA_TIME' ? '120 min phase' : 'Live data'}</span></div>
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-            <div className="text-center"><img src={cleanCrest(match.homeCrest) || ''} alt="" className="mx-auto h-10 w-10 object-contain" onError={event => { event.currentTarget.style.display = 'none'; }} /><p className="mt-1 text-xs font-bold leading-tight">{match.homeTeam}</p></div>
-            <div className="text-center"><p className="text-3xl font-black tracking-tight">{match.homeScore ?? 0} - {match.awayScore ?? 0}</p><p className="text-[10px] font-black text-[#39FF14] mt-1">{match.status === 'PAUSED' ? 'HT' : match.status === 'PENALTY_SHOOTOUT' ? 'PENALTIES' : liveMinute != null ? `${liveMinute}${match.injuryTime ? `+${match.injuryTime}` : ''}' PLAYING` : 'LIVE'}</p></div>
-            <div className="text-center"><img src={cleanCrest(match.awayCrest) || ''} alt="" className="mx-auto h-10 w-10 object-contain" onError={event => { event.currentTarget.style.display = 'none'; }} /><p className="mt-1 text-xs font-bold leading-tight">{match.awayTeam}</p></div>
-          </div>
-          {events.length > 0 && <div className="mt-4 border-t border-[#252b25] pt-3 space-y-1.5 max-h-40 overflow-y-auto">
-            {events.map((event, index) => <div key={`${match.id}-${event.type}-${event.minute}-${event.player}-${index}`} className="flex items-center gap-2 text-[11px] text-[#c7cec7]"><span className="w-9 shrink-0 text-right text-[#7f8b7f] font-mono">{eventMinute(event)}</span><span className="w-5 text-center">{event.type === 'GOAL' ? '⚽' : event.type === 'CARD' ? (event.card === 'RED' || event.card === 'YELLOW_RED' ? '🟥' : '🟨') : '↕'}</span><span className="truncate"><b className="text-white">{eventLabel(event)}</b><span className="text-[#737d73]"> · {event.team || ''}</span></span></div>)}
-          </div>}
-        </article>;
-      })}
+    <div className="px-4 py-3 border-b border-[#263026] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"><div className="flex items-center gap-2"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#39FF14] opacity-60" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#39FF14]" /></span><h2 className="text-sm font-black">LIVE MATCH CENTRE</h2><span className="text-[10px] text-[#7f8b7f]">scores, clock and events every 10 seconds</span></div>{updatedAt && <span className="text-[10px] text-[#7f8b7f]">Checked {new Date(updatedAt).toLocaleTimeString()}</span>}</div>
+    {error && <div className="px-4 py-2 text-[11px] text-amber-300 border-b border-[#263026]">Live feed temporarily unavailable. The last successful state remains visible.</div>}
+    {alerts.length > 0 && <div className="px-4 py-3 border-b border-[#263026] bg-[#121712]"><div className="text-[10px] uppercase font-black text-[#7f8b7f] mb-2">Latest live events</div><div className="flex gap-2 overflow-x-auto">{alerts.map((event, index) => <div key={`${event.match.id}-${event.type}-${event.minute}-${index}`} className="shrink-0 rounded-xl border border-[#293329] bg-[#0d100d] px-3 py-2 text-[11px]"><b>{event.type === 'GOAL' ? '⚽' : '🟨'}</b> {event.match.homeTeam} {event.match.homeScore ?? 0}-{event.match.awayScore ?? 0} · {eventMinute(event)}</div>)}</div></div>}
+    <div className="p-3 space-y-3">{groups.map(([league, leagueMatches]) => <div key={league}><div className="px-2 pb-2 text-[10px] uppercase tracking-wider text-[#7f8b7f] font-black">{league}</div><div className="grid lg:grid-cols-2 gap-3">{leagueMatches.map(match => { const prediction = predictions[match.id]; const liveMinute = displayMinute(match, clockNow); const predictionState = winnerState(match, prediction); const pulse = Boolean(flashIds[match.id]); const recentEvents = [...match.events].sort((a, b) => (b.minute ?? -1) - (a.minute ?? -1)); return <article key={match.id} className={`bg-[#101310] rounded-2xl border p-4 transition-all ${pulse ? 'border-[#39FF14] shadow-[0_0_24px_rgba(57,255,20,0.18)]' : 'border-[#263026]'}`}>
+      <div className="flex items-center justify-between gap-3 mb-3"><div><p className="text-xs font-black text-[#39FF14]">{statusLabel(match, clockNow)}</p><p className="text-[10px] text-[#7f8b7f] mt-0.5">{match.status === 'PAUSED' ? 'HALF-TIME' : match.duration === 'EXTRA_TIME' ? 'EXTRA TIME' : 'LIVE NOW'}</p></div><div className="text-right"><p className="text-[10px] uppercase text-[#7f8b7f]">Momentum</p><p className="text-xs font-black">{momentum(match)}</p></div></div>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3"><div className="text-center"><img src={match.homeCrest || ''} alt="" className="mx-auto h-10 w-10 object-contain" onError={event => { event.currentTarget.style.display = 'none'; }} /><p className="mt-1 text-xs font-bold leading-tight">{match.homeTeam}</p></div><div className="text-center min-w-[82px]"><p className={`text-3xl font-black tracking-tight ${pulse ? 'animate-pulse' : ''}`}>{match.homeScore ?? 0} - {match.awayScore ?? 0}</p><p className="text-[10px] font-black text-[#39FF14] mt-1">{match.status === 'PAUSED' ? 'HT' : match.status === 'PENALTY_SHOOTOUT' ? 'PENALTIES' : liveMinute != null ? `${liveMinute}${match.injuryTime ? `+${match.injuryTime}` : ''}' PLAYING` : 'LIVE'}</p></div><div className="text-center"><img src={match.awayCrest || ''} alt="" className="mx-auto h-10 w-10 object-contain" onError={event => { event.currentTarget.style.display = 'none'; }} /><p className="mt-1 text-xs font-bold leading-tight">{match.awayTeam}</p></div></div>
+      <div className="mt-4 grid sm:grid-cols-2 gap-2"><div className="rounded-xl border border-[#263026] bg-[#0d100d] p-3"><p className="text-[10px] uppercase text-[#7f8b7f]">Prediction status</p><p className={`text-xs font-black mt-1 ${predictionState === 'ON TRACK' ? 'text-[#39FF14]' : predictionState === 'AGAINST PREDICTION' ? 'text-amber-300' : 'text-white'}`}>{predictionState || 'No stored prediction'}</p>{prediction?.confidence != null && <p className="text-[10px] text-[#7f8b7f] mt-1">Confidence {prediction.confidence.toFixed(0)}%</p>}</div><div className="rounded-xl border border-[#263026] bg-[#0d100d] p-3"><p className="text-[10px] uppercase text-[#7f8b7f]">Live insight</p><p className="text-xs leading-5 text-[#c7cec7] mt-1">{liveInsight(match, prediction)}</p></div></div>
+      {recentEvents.length > 0 && <div className="mt-3 border-t border-[#252b25] pt-3 space-y-1.5 max-h-36 overflow-y-auto">{recentEvents.map((event, index) => <div key={`${match.id}-${event.type}-${event.minute}-${event.player}-${index}`} className="flex items-center gap-2 text-[11px] text-[#c7cec7]"><span className="w-9 shrink-0 text-right text-[#7f8b7f] font-mono">{eventMinute(event)}</span><span className="w-5 text-center">{event.type === 'GOAL' ? '⚽' : event.type === 'CARD' ? (event.card === 'RED' || event.card === 'YELLOW_RED' ? '🟥' : '🟨') : '↕'}</span><span className="truncate"><b className="text-white">{eventLabel(event)}</b><span className="text-[#737d73]"> · {event.team || ''}</span></span></div>)}</div>}
+      {prediction && <div className="mt-3 text-[10px] text-[#7f8b7f]">AI expected {prediction.predictedHomeGoals ?? '—'}-{prediction.predictedAwayGoals ?? '—'} · live {match.homeScore ?? 0}-{match.awayScore ?? 0}</div>}
+    </article>; })}</div></div>)}
+      {recentlyFinished.length > 0 && <div><div className="px-2 pt-2 pb-2 text-[10px] uppercase tracking-wider text-[#7f8b7f] font-black">Just finished</div><div className="grid lg:grid-cols-2 gap-3">{recentlyFinished.map(match => <article key={match.id} className="rounded-2xl border border-[#263026] bg-[#101310] p-4"><div className="flex justify-between gap-3"><div><p className="text-xs font-black">{match.homeTeam} vs {match.awayTeam}</p><p className="text-[10px] text-[#7f8b7f] mt-1">{match.league} · FULL-TIME</p></div><p className="text-2xl font-black">{match.homeScore} - {match.awayScore}</p></div><p className="text-[10px] text-[#7f8b7f] mt-3">Final result handed off to analysis history automatically.</p></article>)}</div></div>}
     </div>
   </section>;
 }
