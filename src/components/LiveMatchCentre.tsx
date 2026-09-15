@@ -70,19 +70,30 @@ function eventLabel(event: LiveEvent) {
   return `${event.playerOut || 'Player'} → ${event.playerIn || 'Player'}`;
 }
 
-function statusLabel(match: LiveMatch) {
+function statusLabel(match: LiveMatch, nowMs = Date.now()) {
   if (match.status === 'PAUSED') return 'HALF-TIME';
   if (match.status === 'EXTRA_TIME') return 'EXTRA TIME';
   if (match.status === 'PENALTY_SHOOTOUT') return 'PENALTIES';
   if (match.status === 'FINISHED') return 'FULL-TIME';
-  if (match.minute != null) return `${match.minute}${match.injuryTime ? `+${match.injuryTime}` : ''}'`;
+  const minute = displayMinute(match, nowMs);
+  if (minute != null) return `${minute}${match.injuryTime ? `+${match.injuryTime}` : ''}'`;
   return 'LIVE';
+}
+
+function displayMinute(match: LiveMatch, nowMs = Date.now()): number | null {
+  if (match.minute == null) return null;
+  if (!['IN_PLAY', 'EXTRA_TIME'].includes(match.status)) return match.minute;
+  const anchor = match.lastUpdated ? Date.parse(match.lastUpdated) : Date.parse(match.updatedAt);
+  if (!Number.isFinite(anchor)) return match.minute;
+  const elapsedMinutes = Math.max(0, Math.floor((nowMs - anchor) / 60000));
+  return match.minute + elapsedMinutes;
 }
 
 export function LiveMatchCentre() {
   const [matches, setMatches] = useState<LiveMatch[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   const fetchLive = useCallback(async () => {
     try {
@@ -102,6 +113,7 @@ export function LiveMatchCentre() {
       });
       setMatches(next);
       setUpdatedAt(payload.updatedAt || new Date().toISOString());
+      setClockNow(Date.now());
       setError(false);
     } catch (err) {
       console.error('[LiveMatchCentre] refresh failed', err);
@@ -115,6 +127,11 @@ export function LiveMatchCentre() {
     return () => window.clearInterval(timer);
   }, [fetchLive]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const visibleMatches = useMemo(() => matches.filter(match => ['IN_PLAY', 'PAUSED', 'EXTRA_TIME', 'PENALTY_SHOOTOUT'].includes(match.status)), [matches]);
   if (visibleMatches.length === 0) return null;
 
@@ -127,11 +144,12 @@ export function LiveMatchCentre() {
     <div className="grid lg:grid-cols-2 gap-px bg-[#263026]">
       {visibleMatches.map(match => {
         const events = [...match.events].sort((a, b) => (b.minute ?? -1) - (a.minute ?? -1));
+        const liveMinute = displayMinute(match, clockNow);
         return <article key={match.id} className="bg-[#101310] p-4">
-          <div className="flex items-center justify-between gap-3 mb-3"><div><p className="text-[10px] uppercase text-[#7f8b7f]">{match.league}</p><p className="text-xs font-black text-[#39FF14] mt-0.5">{statusLabel(match)}</p></div><span className="text-[10px] text-[#7f8b7f]">{match.duration === 'EXTRA_TIME' ? '120 min phase' : 'Live data'}</span></div>
+          <div className="flex items-center justify-between gap-3 mb-3"><div><p className="text-[10px] uppercase text-[#7f8b7f]">{match.league}</p><p className="text-xs font-black text-[#39FF14] mt-0.5">{statusLabel(match, clockNow)}</p></div><span className="text-[10px] text-[#7f8b7f]">{match.duration === 'EXTRA_TIME' ? '120 min phase' : 'Live data'}</span></div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
             <div className="text-center"><img src={cleanCrest(match.homeCrest) || ''} alt="" className="mx-auto h-10 w-10 object-contain" onError={event => { event.currentTarget.style.display = 'none'; }} /><p className="mt-1 text-xs font-bold leading-tight">{match.homeTeam}</p></div>
-            <div className="text-center"><p className="text-3xl font-black tracking-tight">{match.homeScore ?? 0} - {match.awayScore ?? 0}</p><p className="text-[10px] font-black text-[#39FF14] mt-1">{match.status === 'PAUSED' ? 'HT' : match.minute != null ? `${match.minute}${match.injuryTime ? `+${match.injuryTime}` : ''}' PLAYING` : 'LIVE'}</p></div>
+            <div className="text-center"><p className="text-3xl font-black tracking-tight">{match.homeScore ?? 0} - {match.awayScore ?? 0}</p><p className="text-[10px] font-black text-[#39FF14] mt-1">{match.status === 'PAUSED' ? 'HT' : match.status === 'PENALTY_SHOOTOUT' ? 'PENALTIES' : liveMinute != null ? `${liveMinute}${match.injuryTime ? `+${match.injuryTime}` : ''}' PLAYING` : 'LIVE'}</p></div>
             <div className="text-center"><img src={cleanCrest(match.awayCrest) || ''} alt="" className="mx-auto h-10 w-10 object-contain" onError={event => { event.currentTarget.style.display = 'none'; }} /><p className="mt-1 text-xs font-bold leading-tight">{match.awayTeam}</p></div>
           </div>
           {events.length > 0 && <div className="mt-4 border-t border-[#252b25] pt-3 space-y-1.5 max-h-40 overflow-y-auto">
