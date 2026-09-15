@@ -3,6 +3,20 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+const SESSION_TOKEN_KEY = 'surebetpro_session';
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  if (!url.includes('/api/')) return nativeFetch(input, init);
+  const headers = new Headers(input instanceof Request ? input.headers : undefined);
+  if (init?.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  if (!headers.has('Authorization')) {
+    const token = localStorage.getItem(SESSION_TOKEN_KEY);
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
+  return nativeFetch(input, { ...init, headers });
+};
+
 // Remove legacy PWA workers/caches left by earlier releases before the app starts.
 // This prevents an old cached JavaScript bundle from crashing after deployment.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
