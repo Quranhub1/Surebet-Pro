@@ -20,7 +20,7 @@ export function History() {
   const loadHistory = async () => {
     try {
       setError(null);
-      const response = await fetch(`${API_BASE_URL}/api/football/history?limit=500`);
+      const response = await fetch(`${API_BASE_URL}/api/football/history?limit=5000`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to load analysis history.');
       const history = Array.isArray(data.history) ? data.history : [];
